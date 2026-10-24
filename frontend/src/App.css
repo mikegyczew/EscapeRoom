@@ -1,3 +1,7 @@
+Claude
+
+
+App · CSS
 .matrix-app {
   position: relative;
   isolation: isolate;
@@ -756,9 +760,7 @@ h1 span {
 }
 
 .guess-form input,
-.guess-form button,
-.clock-slot select,
-.time-picker select {
+.guess-form button {
   min-width: 0;
   padding: 13px;
   border: 1px solid var(--er-border);
@@ -795,6 +797,8 @@ h1 span {
   font-size: 10px;
   letter-spacing: 1px;
 }
+
+.secondary-button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .flip-grid {
   display: flex;
@@ -1063,19 +1067,14 @@ blockquote {
 
 .clock-puzzle h2 { margin-top: 12px; }
 
-.clock-board {
-  display: grid;
-  grid-template-columns: minmax(150px, 0.8fr) minmax(180px, 1fr);
-  align-items: center;
-  gap: 24px;
-  margin: 24px 0;
-}
-
+/* ===== TARCZA ZEGARA ===== */
 .clock-face {
   position: relative;
-  width: min(100%, 240px);
+  width: min(100%, 280px);
   aspect-ratio: 1;
   margin: auto;
+  justify-self: center;
+  overflow: hidden;
   border: 7px solid #8a7044;
   border-radius: 50%;
   background:
@@ -1095,69 +1094,31 @@ blockquote {
   transform: translate(-50%, -50%);
 }
 
+/* Wskazówki obracają się wokół środka; kąt, przezroczystość i transition
+   ustawia App.tsx (inline style). Tarcza stoi w miejscu. */
 .clock-hand {
   position: absolute;
   z-index: 2;
   bottom: 50%;
   left: 50%;
-  width: 4px;
   border-radius: 5px;
   background: #e5c47b;
   transform-origin: bottom center;
+  pointer-events: none;
+  will-change: transform;
+  box-shadow: 0 0 6px rgba(229, 196, 123, 0.35);
 }
 
-.hour-hand { height: 28%; transform: translateX(-50%) rotate(195deg); }
-.minute-hand { height: 39%; transform: translateX(-50%) rotate(180deg); width: 2px; }
+.hour-hand   { width: 6px; height: 28%; transform: translateX(-50%) rotate(195deg); }
+.minute-hand { width: 3px; height: 39%; transform: translateX(-50%) rotate(180deg); }
 
 .clock-number {
   position: absolute;
   color: #e5c47b;
   font-size: 16px;
   font-weight: bold;
+  transition: color 0.2s, border-color 0.2s;
 }
-
-.number-top { top: 8%; left: 50%; transform: translateX(-50%); }
-.number-right { top: 50%; right: 9%; transform: translateY(-50%); }
-.number-bottom { bottom: 8%; left: 50%; transform: translateX(-50%); }
-.number-left { top: 50%; left: 9%; transform: translateY(-50%); }
-
-.clock-slots {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.clock-slot,
-.time-picker label {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  color: var(--er-muted);
-  font-size: 10px;
-  letter-spacing: 1px;
-}
-
-.clock-slot select,
-.time-picker select {
-  width: 100%;
-  background: #07110b;
-  color: var(--er-green);
-}
-
-.clock-slot select:disabled,
-.time-picker select:disabled { opacity: 0.4; }
-
-.time-picker {
-  display: flex;
-  justify-content: center;
-  align-items: end;
-  gap: 12px;
-  max-width: 360px;
-  margin: 24px auto;
-}
-
-.time-picker label { flex: 1; }
-.time-colon { padding-bottom: 12px; color: var(--er-green); font-size: 24px; }
 
 .success-icon,
 .failure-icon {
@@ -1199,8 +1160,6 @@ blockquote {
   .object-9 { left: 78%; }
   .hands-object { left: 72%; }
   .inventory-items { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .clock-board { grid-template-columns: 1fr; }
-  .clock-face { width: 210px; }
   .level2-title-row { align-items: flex-start; flex-direction: column; }
   .game-footer { align-items: flex-start; flex-direction: column; }
 }
@@ -1209,5 +1168,169 @@ blockquote {
   .matrix-rain span { animation: none; }
   .screen { animation: none; }
   .flip-inner { transition: none; }
+  .clock-hand { transition: none !important; }
   * { scroll-behavior: auto !important; }
+}
+
+/* ===== ZAGADKA ZEGARA — cztery liczby na rundę, trzy rundy ===== */
+
+.clock-round-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 16px 0;
+  color: #d7b878;
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+}
+
+.clock-board {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+  align-items: start;
+  gap: 24px;
+  margin: 20px 0;
+}
+
+/* Okrągłe pola z liczbami na tarczy (używane są cztery: 1, 4, 7 i 10). */
+.clock-position {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid #b89554;
+  border-radius: 50%;
+  background: #101a13;
+  color: #f4d99a;
+  font-weight: 700;
+  transform: translate(-50%, -50%);
+}
+
+.clock-position-1  { left: 50%; top: 9%; }
+.clock-position-2  { left: 70.5%; top: 14.5%; }
+.clock-position-3  { left: 85.5%; top: 29.5%; }
+.clock-position-4  { left: 91%; top: 50%; }
+.clock-position-5  { left: 85.5%; top: 70.5%; }
+.clock-position-6  { left: 70.5%; top: 85.5%; }
+.clock-position-7  { left: 50%; top: 91%; }
+.clock-position-8  { left: 29.5%; top: 85.5%; }
+.clock-position-9  { left: 14.5%; top: 70.5%; }
+.clock-position-10 { left: 9%; top: 50%; }
+.clock-position-11 { left: 14.5%; top: 29.5%; }
+.clock-position-12 { left: 29.5%; top: 14.5%; }
+
+.clock-answer-area {
+  min-width: 0;
+}
+
+/* Cztery pola: lewo, góra, prawo, dół. */
+.clock-shuffle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.clock-answer-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.clock-answer-slot > span {
+  color: #a7b5a7;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+}
+
+.clock-answer-slot select {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 5px;
+  border: 1px solid #475d48;
+  border-radius: 5px;
+  background: #101a13;
+  color: #f4e7c7;
+}
+
+/* Liczba użyta w innym polu jest wyszarzona (każda liczba tylko raz). */
+.clock-answer-slot select option:disabled {
+  color: #5d6f5e;
+}
+
+.clock-answer-slot select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Odczyt godziny: do wyboru tylko cztery liczby z rundy. */
+.clock-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.clock-choice {
+  padding: 16px;
+  border: 1px solid var(--er-border);
+  background: #07110b;
+  color: var(--er-green);
+  font: inherit;
+  font-size: 24px;
+  font-weight: bold;
+  cursor: pointer;
+  transition: 0.2s ease;
+}
+
+.clock-choice:hover,
+.clock-choice:focus-visible {
+  border-color: var(--er-green);
+  box-shadow: 0 0 18px rgba(85, 255, 154, 0.2);
+}
+
+.clock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.clock-actions button {
+  flex: 1 1 220px;
+}
+
+/* ===== TŁO: cyfry unoszą się, potem układają się w zegarek ===== */
+
+.memory-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.memory-words {
+  min-height: 1.4em;
+  margin: 0 0 6px;
+  color: var(--er-green);
+  font-size: clamp(20px, 4vw, 30px);
+  font-style: italic;
+  letter-spacing: 1px;
+}
+
+@media (max-width: 680px) {
+  .clock-board {
+    grid-template-columns: 1fr;
+  }
+
+  .clock-face {
+    width: min(100%, 250px);
+  }
 }

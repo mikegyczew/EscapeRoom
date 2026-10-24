@@ -1,0 +1,1244 @@
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import "./App.css";
+
+type Screen =
+  | "intro"
+  | "level1"
+  | "transition"
+  | "level2intro"
+  | "level2"
+  | "success"
+  | "failed";
+
+type GuessResponse = {
+  correct: boolean;
+  complete?: boolean;
+  nextPosition?: number;
+  binary?: string;
+  message?: string;
+};
+
+type FoundItem = {
+  id: string;
+  name: string;
+  description: string;
+  symbol: string;
+};
+
+// Cztery strony krzyża na tarczy i jedna runda = liczba na każdej stronie.
+type Pos = "left" | "top" | "right" | "bottom";
+type ClockRound = Record<Pos, number>;
+
+const PASSWORD = "rozpoczynamy misje";
+
+const MEMORIZE_MS = 5000; // czas zapamiętywania układu
+const REMIND_MS = 3500; // powtórny pokaz po błędnym ułożeniu
+const ROTATE_MS = 2500; // czas obrotu wskazówek po dobrej rundzie
+const TOTAL_ROUNDS = 3;
+const LEVEL2_SECONDS = 300;
+
+const POS: Pos[] = ["left", "top", "right", "bottom"];
+const POS_LABEL: Record<Pos, string> = {
+  left: "LEWO",
+  top: "GÓRA",
+  right: "PRAWO",
+  bottom: "DÓŁ",
+};
+// Kąt wskazówki skierowanej na daną stronę (0° = góra).
+const POS_ANGLE: Record<Pos, number> = {
+  left: 270,
+  top: 0,
+  right: 90,
+  bottom: 180,
+};
+// Która z klas .clock-position-N odpowiada danej stronie tarczy.
+const POS_SLOT: Record<Pos, number> = {
+  left: 10,
+  top: 1,
+  right: 4,
+  bottom: 7,
+};
+
+const ITEMS: FoundItem[] = [
+  {
+    id: "note",
+    name: "Notatka Henryka",
+    description: "Najważniejsze chwile były zawsze po prawej...",
+    symbol: "📜",
+  },
+  {
+    id: "number12",
+    name: "Cyfra 12",
+    description: "Stara, mosiężna dwunastka.",
+    symbol: "12",
+  },
+  {
+    id: "number3",
+    name: "Cyfra 3",
+    description: "Trójka wyryta w kawałku mosiądzu.",
+    symbol: "3",
+  },
+  {
+    id: "number6",
+    name: "Cyfra 6",
+    description: "Szóstka znaleziona pod biurkiem.",
+    symbol: "6",
+  },
+  {
+    id: "number9",
+    name: "Cyfra 9",
+    description: "Dziewiątka ukryta za starą książką.",
+    symbol: "9",
+  },
+  {
+    id: "hands",
+    name: "Wskazówki zegara",
+    description: "Dwie wskazówki. Jedna krótka, druga długa.",
+    symbol: "🕰️",
+  },
+];
+
+function shuffle<T>(items: T[]): T[] {
+  const copy = [...items];
+
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+
+  return copy;
+}
+
+// Losuje trzy rundy. Każda runda to cztery liczby idące co 3
+// (np. 12-3-6-9, 2-5-8-11, 1-4-7-10) ułożone zgodnie z ruchem wskazówek
+// od lewej strony. Kolejność rund i punkt startu w każdej rundzie są losowe,
+// a razem rundy zawierają wszystkie liczby od 1 do 12.
+function makeClockRounds(): ClockRound[] {
+  const groups = shuffle([
+    [12, 3, 6, 9],
+    [2, 5, 8, 11],
+    [1, 4, 7, 10],
+  ]);
+
+  return groups.map((group) => {
+    const offset = Math.floor(Math.random() * 4);
+    const round = {} as ClockRound;
+    POS.forEach((pos, index) => {
+      round[pos] = group[(index + offset) % 4];
+    });
+    return round;
+  });
+}
+
+function MatrixRain({ speed = 1 }: { speed?: number }) {
+  return (
+    <div className="matrix-rain" aria-hidden="true">
+      {Array.from({ length: 22 }, (_, i) => (
+        <span
+          key={i}
+          style={{
+            left: `${(i * 47) % 100}%`,
+            animationDuration: `${Math.max(2, 12 / speed + (i % 4))}s`,
+            animationDelay: `${-(i % 12)}s`,
+          }}
+        >
+          {Array.from({ length: 15 }, (_, j) =>
+            ((i * 7 + j * 3) % 2).toString(),
+          ).join("\n")}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+const MEMORY_WORDS = ["Pamiętam…", "Zapomniałem…", "Która jest godzina?"];
+
+// Unoszące się w tle cyfry 1–12, które układają się w tarczę zegara.
+// mode="cycle": napisy zmieniają się co kilka sekund, cyfry tworzą zegar,
+// potem pojawiają się wskazówki. mode="clock": od razu gotowy zegar.
+function ClockMemoryBackdrop({ mode }: { mode: "cycle" | "clock" }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [step, setStep] = useState(mode === "clock" ? 2 : 0);
+  const stepRef = useRef(step);
+
+  useEffect(() => {
+    stepRef.current = step;
+  }, [step]);
+
+  useEffect(() => {
+    if (mode !== "cycle") return;
+
+    const ids = [
+      window.setTimeout(() => setStep(1), 2600),
+      window.setTimeout(() => setStep(2), 5200),
+    ];
+
+    return () => ids.forEach((id) => window.clearTimeout(id));
+  }, [mode]);
+
+  useEffect(() => {
+    const canvasNode = canvasRef.current;
+    const ctxNode = canvasNode?.getContext("2d");
+    if (!canvasNode || !ctxNode) return;
+
+    const canvas: HTMLCanvasElement = canvasNode;
+    const ctx: CanvasRenderingContext2D = ctxNode;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const dpr = window.devicePixelRatio || 1;
+
+    let w = 0;
+    let h = 0;
+    let raf = 0;
+    let morph = stepRef.current >= 1 ? 1 : 0;
+    let hands = stepRef.current >= 2 ? 1 : 0;
+
+    const digits = Array.from({ length: 12 }, (_, i) => ({
+      n: i + 1,
+      x: 0,
+      y: 0,
+      vx: 0,
+      vy: 0,
+      size: 0,
+    }));
+
+    const resize = () => {
+      w = window.innerWidth;
+      h = window.innerHeight;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      digits.forEach((d) => {
+        d.x = Math.random() * w;
+        d.y = Math.random() * h;
+        d.vx = reduce ? 0 : (Math.random() - 0.5) * 0.6;
+        d.vy = reduce ? 0 : (Math.random() - 0.5) * 0.6;
+        d.size = 30 + Math.random() * 30;
+      });
+    };
+
+    const tick = () => {
+      morph += ((stepRef.current >= 1 ? 1 : 0) - morph) * (reduce ? 1 : 0.035);
+      hands += ((stepRef.current >= 2 ? 1 : 0) - hands) * (reduce ? 1 : 0.06);
+
+      ctx.clearRect(0, 0, w, h);
+
+      const radius = Math.min(w, h) * 0.34;
+      const cx = w / 2;
+      const cy = h * 0.5;
+      const e =
+        morph < 0.5
+          ? 2 * morph * morph
+          : 1 - Math.pow(-2 * morph + 2, 2) / 2;
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#55ff9a";
+
+      digits.forEach((d) => {
+        d.x += d.vx;
+        d.y += d.vy;
+        if (d.x < -40) d.x = w + 40;
+        if (d.x > w + 40) d.x = -40;
+        if (d.y < -40) d.y = h + 40;
+        if (d.y > h + 40) d.y = -40;
+
+        const angle = (d.n / 12) * Math.PI * 2 - Math.PI / 2;
+        const tx = cx + Math.cos(angle) * radius;
+        const ty = cy + Math.sin(angle) * radius;
+
+        ctx.globalAlpha = 0.25 + 0.4 * e;
+        ctx.font = `${d.size + (26 - d.size) * e}px "Courier New", monospace`;
+        ctx.fillText(String(d.n), d.x + (tx - d.x) * e, d.y + (ty - d.y) * e);
+      });
+
+      if (hands > 0.02) {
+        ctx.strokeStyle = "#e5c47b";
+        ctx.lineCap = "round";
+        ctx.globalAlpha = 0.7 * hands;
+
+        const drawHand = (deg: number, length: number, width: number) => {
+          const a = ((deg - 90) * Math.PI) / 180;
+          ctx.lineWidth = width;
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.lineTo(
+            cx + Math.cos(a) * length * hands,
+            cy + Math.sin(a) * length * hands,
+          );
+          ctx.stroke();
+        };
+
+        drawHand(305, radius * 0.55, 5);
+        drawHand(60, radius * 0.8, 3);
+      }
+
+      ctx.globalAlpha = 1;
+      raf = window.requestAnimationFrame(tick);
+    };
+
+    resize();
+    tick();
+    window.addEventListener("resize", resize);
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener("resize", resize);
+    };
+  }, []);
+
+  return (
+    <>
+      <canvas ref={canvasRef} className="memory-backdrop" aria-hidden="true" />
+      {mode === "cycle" && (
+        <p className="memory-words" aria-live="polite">
+          {MEMORY_WORDS[step]}
+        </p>
+      )}
+    </>
+  );
+}
+
+function formatTime(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+}
+
+function App() {
+  const [screen, setScreen] = useState<Screen>("intro");
+
+  // Level 1
+  const [position, setPosition] = useState(0);
+  const [guess, setGuess] = useState("");
+  const [decoded, setDecoded] = useState<string[]>([]);
+  const [attempts, setAttempts] = useState(0);
+  const [errors, setErrors] = useState(0);
+  const [level1Started, setLevel1Started] = useState<number | null>(null);
+  const [level1Seconds, setLevel1Seconds] = useState(0);
+  const [feedback, setFeedback] = useState("");
+
+  // Level 2
+  const [found, setFound] = useState<string[]>([]);
+  const [selectedObject, setSelectedObject] = useState<FoundItem | null>(null);
+  // Kolejność zawsze jak w POS: lewo, góra, prawo, dół.
+  const [clockSlots, setClockSlots] = useState<string[]>(Array(4).fill(""));
+  const [secondsLeft, setSecondsLeft] = useState(LEVEL2_SECONDS);
+  const [level2Attempts, setLevel2Attempts] = useState(0);
+  const [clockMessage, setClockMessage] = useState("");
+  const [allFlipped, setAllFlipped] = useState(false);
+  const [clockRound, setClockRound] = useState(1);
+  const [clockRounds, setClockRounds] = useState<ClockRound[]>(() =>
+    makeClockRounds(),
+  );
+  const [clockMemorizing, setClockMemorizing] = useState(false);
+  const [clockRotating, setClockRotating] = useState(false);
+  const [clockReading, setClockReading] = useState(false);
+  const [clockRoundsCompleted, setClockRoundsCompleted] = useState(0);
+  const [handSpins, setHandSpins] = useState(0);
+  const [handDir, setHandDir] = useState<Pos>("top");
+  const progress = Math.min(position, PASSWORD.length);
+
+  // Wszystkie timeouty trzymamy w jednym miejscu, żeby można je było
+  // czyścić przy resecie, zmianie ekranu i odmontowaniu komponentu.
+  const timeoutsRef = useRef<number[]>([]);
+
+  function schedule(callback: () => void, delay: number) {
+    const id = window.setTimeout(() => {
+      timeoutsRef.current = timeoutsRef.current.filter((t) => t !== id);
+      callback();
+    }, delay);
+    timeoutsRef.current.push(id);
+  }
+
+  function clearTimers() {
+    timeoutsRef.current.forEach((id) => window.clearTimeout(id));
+    timeoutsRef.current = [];
+  }
+
+  useEffect(() => clearTimers, []);
+
+  // Timer pierwszego poziomu.
+  useEffect(() => {
+    if (screen !== "level1" || level1Started === null) return;
+
+    const timer = window.setInterval(() => {
+      setLevel1Seconds(Math.floor((Date.now() - level1Started) / 1000));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [screen, level1Started]);
+
+  // Pięciominutowy timer drugiego poziomu (tylko odlicza).
+  useEffect(() => {
+    if (screen !== "level2") return;
+
+    const timer = window.setInterval(() => {
+      setSecondsLeft((previous) => Math.max(0, previous - 1));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [screen]);
+
+  // Koniec czasu -> porażka. Wyniesione z updatera setState.
+  useEffect(() => {
+    if (screen === "level2" && secondsLeft <= 0) {
+      clearTimers();
+      setClockMemorizing(false);
+      setClockRotating(false);
+      setClockReading(false);
+      setScreen("failed");
+    }
+  }, [screen, secondsLeft]);
+
+  function startLevel1() {
+    clearTimers();
+    setPosition(0);
+    setGuess("");
+    setDecoded([]);
+    setAttempts(0);
+    setErrors(0);
+    setFeedback("");
+    setLevel1Seconds(0);
+    setLevel1Started(Date.now());
+    setScreen("level1");
+  }
+
+  async function submitGuess(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const value = guess.trim().toLowerCase();
+    if (!value) return;
+
+    setAttempts((previous) => previous + 1);
+    setFeedback("");
+
+    let nextPosition = position;
+    let hadError = false;
+    const newCharacters = [...decoded];
+
+    try {
+      for (const character of value) {
+        if (nextPosition >= PASSWORD.length) break;
+
+        const response = await fetch("/api/puzzles/first/guess", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            position: nextPosition,
+            letter: character,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Błąd API: ${response.status}`);
+        }
+
+        const result = (await response.json()) as GuessResponse;
+
+        if (!result.correct) {
+          hadError = true;
+          setErrors((previous) => previous + 1);
+          setFeedback(result.message || "BŁĘDNY ZNAK. SPRÓBUJ PONOWNIE.");
+          break;
+        }
+
+        newCharacters[nextPosition] = character;
+        nextPosition += 1;
+      }
+
+      setDecoded(newCharacters);
+      setPosition(nextPosition);
+      setGuess("");
+
+      if (nextPosition >= PASSWORD.length) {
+        setFeedback("SZYFR ZŁAMANY. DRZWI ZOSTAŁY OTWARTE.");
+        schedule(() => setScreen("transition"), 1000);
+      } else if (!hadError && nextPosition > position) {
+        setFeedback("ZNAK ZAAKCEPTOWANY. KONTYNUUJ.");
+      }
+    } catch {
+      setFeedback(
+        "Nie można połączyć się z API. Sprawdź, czy backend działa na porcie 5166.",
+      );
+    }
+  }
+
+  // Zaczyna rundę: pokazuje cztery liczby tej rundy na ms milisekund, potem je ukrywa.
+  // Układ rund jest losowany raz na całą misję (makeClockRounds), nie przy każdej rundzie.
+  function beginMemorization(round: number, message: string, ms = MEMORIZE_MS) {
+    clearTimers();
+    setClockRound(round);
+    setClockSlots(Array(4).fill(""));
+    setClockRotating(false);
+    setClockReading(false);
+    setClockMemorizing(true);
+    setClockMessage(message);
+
+    schedule(() => {
+      setClockMemorizing(false);
+      setClockMessage(
+        "Zapomniałem… gdzie które stało? Ułóż liczby na swoich miejscach.",
+      );
+    }, ms);
+  }
+
+  function startLevel2() {
+    clearTimers();
+    setFound([]);
+    setSelectedObject(null);
+    setClockSlots(Array(4).fill(""));
+    setClockRounds(makeClockRounds());
+    setClockRound(1);
+    setClockRoundsCompleted(0);
+    setClockMemorizing(false);
+    setClockRotating(false);
+    setClockReading(false);
+    setHandDir("top");
+    setSecondsLeft(LEVEL2_SECONDS);
+    setLevel2Attempts(0);
+    setClockMessage("");
+    setScreen("level2intro");
+  }
+
+  function beginClockMission() {
+    setSecondsLeft(LEVEL2_SECONDS);
+    setClockRoundsCompleted(0);
+    setLevel2Attempts(0);
+    setClockRounds(makeClockRounds());
+    setScreen("level2");
+    beginMemorization(1, `Runda 1/${TOTAL_ROUNDS}. Pamiętam… zapamiętaj liczby!`);
+  }
+
+  function collectItem(item: FoundItem) {
+    if (found.includes(item.id)) {
+      setSelectedObject(item);
+      return;
+    }
+
+    setFound((previous) => [...previous, item.id]);
+    setSelectedObject(item);
+    if (!clockMemorizing) {
+      setClockMessage(`Odnaleziono: ${item.name}`);
+    }
+  }
+
+  function setClockSlot(index: number, value: string) {
+    setClockSlots((previous) => {
+      // Każda liczba może być użyta tylko raz.
+      if (value && previous.some((slot, i) => i !== index && slot === value)) {
+        return previous;
+      }
+      return previous.map((slot, i) => (i === index ? value : slot));
+    });
+  }
+
+  // Reset: nowy, losowy zestaw rund i pierwsza runda od początku.
+  function resetClockShuffle() {
+    if (clockRotating) return;
+    setClockRounds(makeClockRounds());
+    setClockRoundsCompleted(0);
+    beginMemorization(
+      1,
+      `Runda 1/${TOTAL_ROUNDS}. Pamiętam… zapamiętaj nowy układ!`,
+    );
+  }
+
+  function checkClock() {
+    if (clockMemorizing || clockRotating || clockReading) {
+      setClockMessage("Poczekaj, aż zegar zakończy ruch.");
+      return;
+    }
+
+    const hasAllItems = ITEMS.every((item) => found.includes(item.id));
+
+    if (!hasAllItems) {
+      setClockMessage("Najpierw odnajdź wszystkie elementy w pokoju.");
+      return;
+    }
+
+    // Wszystkie 4 pola muszą być wypełnione, bez powtórzeń.
+    if (clockSlots.some((slot) => slot === "")) {
+      setClockMessage("Uzupełnij wszystkie 4 pozycje.");
+      return;
+    }
+
+    setLevel2Attempts((previous) => previous + 1);
+
+    const correct = clockSlots.every(
+      (slot, index) => slot === clockTarget[index],
+    );
+
+    if (!correct) {
+      beginMemorization(
+        clockRound,
+        "Nie tak. Henryk przypomina układ jeszcze raz…",
+        REMIND_MS,
+      );
+      return;
+    }
+
+    // Wskazówki obracają się i zatrzymują na losowej stronie tarczy.
+    const nextDir = POS[Math.floor(Math.random() * POS.length)];
+
+    setHandDir(nextDir);
+    setHandSpins((previous) => previous + 1);
+    setClockRotating(true);
+    setClockMessage("Dobrze! Wskazówki się obracają...");
+
+    schedule(() => {
+      setClockRotating(false);
+      setClockReading(true);
+      setClockMessage(
+        "Która jest godzina? Krótka wskazówka pokazuje godzinę — wybierz liczbę.",
+      );
+    }, ROTATE_MS);
+  }
+
+  // Gracz odczytuje godzinę: liczba, na którą wskazuje krótka wskazówka.
+  function answerHour(value: string) {
+    if (!clockReading) return;
+
+    setLevel2Attempts((previous) => previous + 1);
+
+    const expected = clockTarget[POS.indexOf(handDir)];
+
+    if (value !== expected) {
+      setClockMessage(
+        "To nie ta godzina. Sprawdź, na którą stronę wskazuje krótka wskazówka.",
+      );
+      return;
+    }
+
+    setClockReading(false);
+
+    const completed = clockRoundsCompleted + 1;
+    setClockRoundsCompleted(completed);
+    setClockSlots(Array(4).fill(""));
+
+    if (completed >= TOTAL_ROUNDS) {
+      setClockMessage("TIK... TAK... MECHANIZM ZASKOCZYŁ!");
+      schedule(() => setScreen("success"), 1200);
+      return;
+    }
+
+    beginMemorization(
+      completed + 1,
+      `Runda ${completed + 1}/${TOTAL_ROUNDS}. Pamiętam… zapamiętaj nowe liczby!`,
+    );
+  }
+
+  // Liczby bieżącej rundy w kolejności lewo, góra, prawo, dół.
+  const currentRound = clockRounds[Math.min(clockRound, TOTAL_ROUNDS) - 1];
+  const clockTarget = POS.map((pos) => String(currentRound[pos]));
+  // Do wyboru są tylko cztery liczby z tej rundy.
+  const choices = [...clockTarget].sort((a, b) => Number(a) - Number(b));
+  const usedDigits = new Set(clockSlots.filter(Boolean));
+  const showDigits = clockMemorizing || clockRotating || clockReading;
+
+  // Kąty wskazówek – obracają się wokół środka, tarcza stoi w miejscu.
+  // Po dobrym ułożeniu: wskazówka godzinowa robi 1 obrót, minutowa 12 obrotów
+  // i obie zatrzymują się na wylosowanej stronie tarczy.
+  const hourAngle = POS_ANGLE[handDir] + handSpins * 360;
+  const minuteAngle = POS_ANGLE[handDir] + handSpins * 360 * 12;
+  const handTransition = `transform ${ROTATE_MS}ms ease-in-out, opacity 0.4s`;
+  const handOpacity = clockRotating || clockReading ? 1 : 0.15;
+
+  return (
+    <main className="game-shell">
+      <MatrixRain speed={screen === "level1" ? 1.7 : 0.7} />
+
+      <header className="game-header">
+        <div className="brand">
+          <span className="brand-mark">⌘</span>
+          <span>ESCAPE<span className="accent">ROOM</span></span>
+        </div>
+        <div className="system-status">
+          <span className="status-dot" />
+          SYSTEM ONLINE
+        </div>
+      </header>
+
+      {screen === "intro" && (
+        <section className="screen intro-screen">
+          <div className="eyebrow">SYSTEM ZAGADEK // 001</div>
+          <h1>
+            KAŻDY KOD
+            <br />
+            <span className="accent">MA SWOJĄ TAJEMNICĘ.</span>
+          </h1>
+          <p className="lead">
+            Jesteś zamknięty w systemie. Odszyfruj wiadomość, znajdź wyjście
+            i odkryj, co czeka za kolejnymi drzwiami.
+          </p>
+
+          <div className="mission-card">
+            <div className="mission-number">01</div>
+            <div>
+              <div className="eyebrow">PIERWSZA MISJA</div>
+              <h2>Rozpoczynamy misję</h2>
+              <p>Odszyfruj wiadomość zapisaną w kodzie binarnym.</p>
+            </div>
+            <span className="mission-lock">🔓</span>
+          </div>
+
+          <button className="primary-button" onClick={startLevel1}>
+            ROZPOCZNIJ MISJĘ <span>→</span>
+          </button>
+          <p className="small-note">MISJA 01 // SZYFR BINARNY</p>
+        </section>
+      )}
+
+      {screen === "level1" && (
+        <section className="screen">
+          <div className="eyebrow">MISJA 01 / SZYFR BINARNY</div>
+          <h1 className="section-title">
+            ODSZYFRUJ <span className="accent">WIADOMOŚĆ</span>
+          </h1>
+          <p className="lead">
+            Każda litera ma swój kod. Odkryj hasło, które otworzy pierwsze
+            drzwi.
+          </p>
+
+          <div className="stats-grid">
+            <div className="stat-card">
+              <span>CZAS</span>
+              <strong>{formatTime(level1Seconds)}</strong>
+            </div>
+            <div className="stat-card">
+              <span>POSTĘP</span>
+              <strong>{progress}/{PASSWORD.length}</strong>
+            </div>
+            <div className="stat-card">
+              <span>PRÓBY</span>
+              <strong>{attempts}</strong>
+            </div>
+            <div className="stat-card">
+              <span>BŁĘDY</span>
+              <strong>{errors}</strong>
+            </div>
+          </div>
+
+          <div className="progress-track">
+            <div
+              className="progress-fill"
+              style={{ width: `${(progress / PASSWORD.length) * 100}%` }}
+            />
+          </div>
+
+          <div className="terminal-panel">
+            <div className="terminal-heading">
+              <span>TERMINAL ODSZYFROWUJĄCY</span>
+              <span className="live-label">● LIVE</span>
+            </div>
+            <div className="binary-display">
+              {Array.from({ length: 8 }, (_, index) => (
+                <span key={index}>
+                  {((index + progress) % 2).toString()}
+                </span>
+              ))}
+            </div>
+            <div className="terminal-hint">
+              Wprowadź hasło lub jego kolejną część.
+            </div>
+
+            <form className="guess-form" onSubmit={submitGuess}>
+              <input
+                value={guess}
+                onChange={(event) => setGuess(event.target.value)}
+                placeholder="Wpisz odszyfrowane hasło..."
+                autoComplete="off"
+                disabled={progress >= PASSWORD.length}
+              />
+              <button type="submit" disabled={!guess.trim()}>
+                SPRAWDŹ
+              </button>
+            </form>
+            <p className="feedback" role="status">{feedback}</p>
+          </div>
+
+          <div className="decoded-panel">
+            <div className="decoded-heading">
+              <div>
+                <div className="eyebrow">ODKRYTE ZNAKI</div>
+                <h2>Ślady szyfru</h2>
+              </div>
+              <button
+                className="secondary-button"
+                onClick={() => setAllFlipped((previous) => !previous)}
+              >
+                {allFlipped ? "UKRYJ LITERY" : "ODWRÓĆ WSZYSTKIE"}
+              </button>
+            </div>
+
+            <div className="flip-grid">
+              {decoded.map((character, index) => (
+                <button
+                  key={`${index}-${character}`}
+                  className={`flip-card ${allFlipped ? "is-flipped" : ""}`}
+                  onClick={(event) =>
+                    event.currentTarget.classList.toggle("is-flipped")
+                  }
+                  title="Kliknij, aby odwrócić kartę"
+                >
+                  <span className="flip-inner">
+                    <span className="flip-front">
+                      {character.charCodeAt(0).toString(2).padStart(8, "0")}
+                    </span>
+                    <span className="flip-back">
+                      {character === " " ? "␣" : character.toUpperCase()}
+                    </span>
+                  </span>
+                </button>
+              ))}
+              {decoded.length === 0 && (
+                <p className="empty-state">
+                  Odkryte litery pojawią się tutaj.
+                </p>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {screen === "transition" && (
+        <section className="screen story-screen">
+          <div className="success-icon">✓</div>
+          <div className="eyebrow">MISJA 01 // ZAKOŃCZONA</div>
+          <h1>
+            PIERWSZE DRZWI
+            <br />
+            <span className="accent">SĄ OTWARTE.</span>
+          </h1>
+          <p className="story-quote">
+            „Próbował to zrobić setki razy. Ani razu mu się nie udało.”
+          </p>
+          <p className="lead">
+            Przechodzisz do kolejnego pomieszczenia. Widzisz stare biurko,
+            rozsypane zębatki i kartkę pokrytą rysunkami zegara. Na marginesie
+            ktoś napisał:
+          </p>
+          <blockquote>
+            „Głowa już nie wie, która godzina. Dzieci myślą, że zwariowałem...
+            Ale w tym zegarze naprawdę jest klucz.”
+          </blockquote>
+
+          <div className="mission-card unlocked">
+            <div className="mission-number">02</div>
+            <div>
+              <div className="eyebrow">NOWA MISJA ODBLOKOWANA</div>
+              <h2>Zegar Henryka</h2>
+              <p>Masz pięć minut. Ułóż zegar i otwórz drzwi.</p>
+            </div>
+            <span className="mission-lock">🔓</span>
+          </div>
+
+          <button className="primary-button" onClick={startLevel2}>
+            PRZEJDŹ DO LEVELU 2 <span>→</span>
+          </button>
+          <button className="text-button" onClick={startLevel1}>
+            ↻ Powtórz pierwszą misję
+          </button>
+        </section>
+      )}
+
+      {screen === "level2intro" && (
+        <section className="screen story-screen">
+          <ClockMemoryBackdrop mode="cycle" />
+          <div className="eyebrow">MISJA 02 / ZAGINIONY CZAS</div>
+          <h1>
+            ZEGAR
+            <br />
+            <span className="accent">HENRYKA</span>
+          </h1>
+
+          <p className="story-quote">
+            „Próbował to zrobić setki razy. Ani razu mu się nie udało.”
+          </p>
+
+          <div className="story-body">
+            <p>
+              Pan Henryk przez całe życie był zegarmistrzem. Kiedy zaczęła się
+              choroba, czas stał się jego największym wrogiem.
+            </p>
+            <p>
+              Siedział przy tym biurku całymi dniami, próbując ułożyć prostą
+              tarczę z cyfr. Myśli jednak ciągle mu uciekały – mylił
+              <strong> 12 z 6</strong>, a wskazówki rysował po drugiej stronie
+              pętli.
+            </p>
+            <p>
+              Na marginesie ostatniej kartki napisał drżącą ręką:
+            </p>
+            <blockquote>
+              „Głowa już nie wie, która godzina. Dzieci myślą, że zwariowałem...
+              Ale w tym zegarze naprawdę jest klucz.”
+            </blockquote>
+            <p>
+              Drzwi do jego pracowni zatrzaskują się. Masz <strong>5 minut</strong>,
+              zanim stary zamek automatyczny zatrzaśnie się na stałe.
+            </p>
+            <p>
+              Spójrz na rozsypane zębatki jego oczami, zrozum błędne notatki,
+              które po sobie zostawił, i ułóż zegar tak, jak on desperacko
+              próbował go zobaczyć.
+            </p>
+          </div>
+
+          <div className="warning-box">
+            <span>⏱</span>
+            <div>
+              <strong>LIMIT CZASU: 05:00</strong>
+              <p>Po rozpoczęciu misji zegar nie zatrzyma się.</p>
+            </div>
+          </div>
+
+          <button className="primary-button" onClick={beginClockMission}>
+            ZROZUM I ZŁÓŻ ZEGAR <span>→</span>
+          </button>
+        </section>
+      )}
+
+      {screen === "level2" && (
+        <section className="screen level2-screen">
+          <div className="eyebrow">MISJA 02 / ZEGAR HENRYKA</div>
+          <div className="level2-title-row">
+            <h1 className="section-title">
+              OSTATNIE <span className="accent">5 MINUT</span>
+            </h1>
+            <div className={`countdown ${secondsLeft <= 60 ? "danger" : ""}`}>
+              ⏱ {formatTime(secondsLeft)}
+            </div>
+          </div>
+
+          <p className="lead">
+            Przeszukaj pracownię. Znajdź cztery cyfry i wskazówki, a następnie
+            odtwórz zegar z rysunku Henryka.
+          </p>
+
+          <div className="stats-grid">
+            <div className="stat-card">
+              <span>ELEMENTY</span>
+              <strong>{found.length}/6</strong>
+            </div>
+            <div className="stat-card">
+              <span>PRÓBY ZEGARA</span>
+              <strong>{level2Attempts}</strong>
+            </div>
+            <div className="stat-card">
+              <span>RUNDY</span>
+              <strong>{clockRoundsCompleted}/{TOTAL_ROUNDS}</strong>
+            </div>
+          </div>
+
+          <div className="workshop">
+            <div className="workshop-label">PRACOWNIA HENRYKA // ROZEJRZYJ SIĘ</div>
+            <div className="room-scene">
+              <div className="room-window">🌙</div>
+              <div className="room-shelf">📚　🕰️　📚</div>
+              <button
+                className={`room-object paper-object ${found.includes("note") ? "collected" : ""}`}
+                onClick={() => collectItem(ITEMS[0])}
+                aria-label="Znajdź notatkę"
+              >
+                📜
+                <small>{found.includes("note") ? "ZNALEZIONO" : "NOTATKA"}</small>
+              </button>
+              <button
+                className={`room-object number-object object-12 ${found.includes("number12") ? "collected" : ""}`}
+                onClick={() => collectItem(ITEMS[1])}
+              >
+                12
+                <small>{found.includes("number12") ? "✓" : "CYFRA"}</small>
+              </button>
+              <button
+                className={`room-object number-object object-3 ${found.includes("number3") ? "collected" : ""}`}
+                onClick={() => collectItem(ITEMS[2])}
+              >
+                3
+                <small>{found.includes("number3") ? "✓" : "CYFRA"}</small>
+              </button>
+              <button
+                className={`room-object number-object object-6 ${found.includes("number6") ? "collected" : ""}`}
+                onClick={() => collectItem(ITEMS[3])}
+              >
+                6
+                <small>{found.includes("number6") ? "✓" : "CYFRA"}</small>
+              </button>
+              <button
+                className={`room-object number-object object-9 ${found.includes("number9") ? "collected" : ""}`}
+                onClick={() => collectItem(ITEMS[4])}
+              >
+                9
+                <small>{found.includes("number9") ? "✓" : "CYFRA"}</small>
+              </button>
+              <button
+                className={`room-object hands-object ${found.includes("hands") ? "collected" : ""}`}
+                onClick={() => collectItem(ITEMS[5])}
+              >
+                🕰️
+                <small>{found.includes("hands") ? "✓" : "WSKAZÓWKI"}</small>
+              </button>
+              <div className="desk">
+                <span>STARE BIURKO</span>
+                <span>⚙️</span>
+                <span>🗝️</span>
+              </div>
+            </div>
+            <p className="room-instruction">
+              Klikaj przedmioty w pokoju, aby je zbierać i czytać notatki.
+            </p>
+          </div>
+
+          {selectedObject && (
+            <div className="discovery-panel">
+              <span className="discovery-symbol">{selectedObject.symbol}</span>
+              <div>
+                <div className="eyebrow">ODKRYCIE</div>
+                <strong>{selectedObject.name}</strong>
+                <p>{selectedObject.description}</p>
+              </div>
+              <button
+                className="close-button"
+                onClick={() => setSelectedObject(null)}
+                aria-label="Zamknij opis"
+              >
+                ×
+              </button>
+            </div>
+          )}
+
+          <div className="inventory-panel">
+            <div className="eyebrow">EKWIPUNEK — {found.length}/6</div>
+            <div className="inventory-items">
+              {ITEMS.map((item) => (
+                <div
+                  key={item.id}
+                  className={`inventory-item ${found.includes(item.id) ? "found" : ""}`}
+                >
+                  <span>{found.includes(item.id) ? item.symbol : "?"}</span>
+                  <small>{found.includes(item.id) ? item.name : "Nieodkryte"}</small>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="clock-puzzle">
+            <div className="eyebrow">UKŁADANKA // PAMIĘĆ ZEGARA</div>
+
+            <h2>Pamiętam… zapomniałem… która godzina?</h2>
+
+            <p className="puzzle-hint">
+              Runda {Math.min(clockRound, TOTAL_ROUNDS)}/{TOTAL_ROUNDS} —
+              Henryk pokazuje cztery liczby: po lewej, na górze, po prawej i
+              na dole. Zapamiętaj je, potem ułóż je na swoich miejscach (do
+              wyboru masz tylko te cztery). Gdy układ będzie dobry, odczytaj
+              godzinę ze wskazówek. Wszystkie liczby od 1 do 12 pojawią się
+              w trzech rundach.
+            </p>
+
+            <div className="clock-round-status" aria-live="polite">
+              <span>RUNDA {Math.min(clockRound, TOTAL_ROUNDS)} / {TOTAL_ROUNDS}</span>
+              <span>ZALICZONE: {clockRoundsCompleted} / {TOTAL_ROUNDS}</span>
+            </div>
+
+            <div className="clock-board">
+              <div
+                className="clock-face"
+                aria-label="Tarcza zegara"
+              >
+                {POS.map((pos, index) => (
+                  <div
+                    key={`${clockRound}-${pos}`}
+                    className={`clock-number clock-position clock-position-${POS_SLOT[pos]}`}
+                  >
+                    {showDigits ? clockTarget[index] : "?"}
+                  </div>
+                ))}
+
+                {found.includes("hands") && (
+                  <>
+                    <div
+                      className="clock-hand hour-hand"
+                      style={{
+                        transform: `translateX(-50%) rotate(${hourAngle}deg)`,
+                        transformOrigin: "50% 100%",
+                        transition: handTransition,
+                        opacity: handOpacity,
+                      }}
+                    />
+                    <div
+                      className="clock-hand minute-hand"
+                      style={{
+                        transform: `translateX(-50%) rotate(${minuteAngle}deg)`,
+                        transformOrigin: "50% 100%",
+                        transition: handTransition,
+                        opacity: handOpacity,
+                      }}
+                    />
+                  </>
+                )}
+                <div className="clock-center" />
+              </div>
+
+              <div className="clock-answer-area">
+                <div className="eyebrow">
+                  {clockMemorizing
+                    ? "PAMIĘTAM... ZAPAMIĘTUJ"
+                    : clockRotating
+                      ? "WSKAZÓWKI SIĘ OBRACAJĄ..."
+                      : clockReading
+                        ? "ODCZYTAJ GODZINĘ"
+                        : "ZAPOMNIAŁEM... ODTWÓRZ UKŁAD"}
+                </div>
+
+                {clockReading ? (
+                  <div className="clock-choices">
+                    {choices.map((digit) => (
+                      <button
+                        key={digit}
+                        className="clock-choice"
+                        onClick={() => answerHour(digit)}
+                      >
+                        {digit}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="clock-shuffle-grid">
+                    {POS.map((pos, index) => (
+                      <label key={pos} className="clock-answer-slot">
+                        <span>{POS_LABEL[pos]}</span>
+
+                        <select
+                          aria-label={`Liczba: ${POS_LABEL[pos].toLowerCase()}`}
+                          value={clockSlots[index] ?? ""}
+                          onChange={(event) =>
+                            setClockSlot(index, event.target.value)
+                          }
+                          disabled={clockMemorizing || clockRotating}
+                        >
+                          <option value="">?</option>
+
+                          {choices.map((digit) => (
+                            <option
+                              key={digit}
+                              value={digit}
+                              disabled={
+                                usedDigits.has(digit) &&
+                                clockSlots[index] !== digit
+                              }
+                            >
+                              {digit}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="clock-actions">
+              <button
+                className="secondary-button"
+                onClick={resetClockShuffle}
+                disabled={clockRotating}
+              >
+                ↻ RESETUJ ROZSYPANKĘ
+              </button>
+
+              <button
+                className="primary-button"
+                onClick={checkClock}
+                disabled={
+                  found.length !== ITEMS.length ||
+                  clockMemorizing ||
+                  clockRotating ||
+                  clockReading
+                }
+              >
+                SPRAWDŹ UKŁAD <span>→</span>
+              </button>
+            </div>
+
+            <p className="feedback" role="status">
+              {clockMessage}
+            </p>
+          </div>
+        </section>
+      )}
+
+      {screen === "success" && (
+        <section className="screen ending-screen">
+          <ClockMemoryBackdrop mode="clock" />
+          <div className="success-icon">✓</div>
+          <div className="eyebrow">MISJA 02 // ZAKOŃCZONA</div>
+          <h1>
+            CZAS
+            <br />
+            <span className="accent">RUSZYŁ DALEJ.</span>
+          </h1>
+          <p className="lead">
+            Tik... tak... Wskazówki zatrzymują się na właściwej godzinie.
+            Zegar wydaje cichy dźwięk, a zamek w drzwiach ustępuje.
+          </p>
+          <blockquote>
+            Na odwrocie tarczy znajdujesz ostatnią wiadomość Henryka:
+            „Jeśli to czytasz, znaczy, że ktoś wreszcie zrozumiał.”
+          </blockquote>
+          <div className="stats-grid">
+            <div className="stat-card">
+              <span>POZOSTAŁY CZAS</span>
+              <strong>{formatTime(secondsLeft)}</strong>
+            </div>
+            <div className="stat-card">
+              <span>ODNALEZIONE</span>
+              <strong>{found.length}/6</strong>
+            </div>
+            <div className="stat-card">
+              <span>PRÓBY</span>
+              <strong>{level2Attempts}</strong>
+            </div>
+          </div>
+          <button className="primary-button" onClick={() => setScreen("intro")}>
+            WRÓĆ DO MENU <span>→</span>
+          </button>
+          <button className="text-button" onClick={startLevel2}>
+            ↻ Zagraj w Level 2 ponownie
+          </button>
+        </section>
+      )}
+
+      {screen === "failed" && (
+        <section className="screen ending-screen">
+          <div className="failure-icon">×</div>
+          <div className="eyebrow">MISJA 02 // CZAS MINĄŁ</div>
+          <h1>
+            ZAMEK
+            <br />
+            <span className="danger-text">ZATRZAŚNIĘTY.</span>
+          </h1>
+          <p className="lead">
+            Mechanizm zablokował drzwi. Historia Henryka nadal kryje
+            odpowiedź — spróbuj ponownie, tym razem uważniej.
+          </p>
+          <button className="primary-button" onClick={startLevel2}>
+            SPRÓBUJ PONOWNIE <span>↻</span>
+          </button>
+          <button className="text-button" onClick={() => setScreen("transition")}>
+            Wróć do przejścia między misjami
+          </button>
+        </section>
+      )}
+
+      <footer className="game-footer">
+        <span>ESCAPE ROOM // INTERACTIVE PUZZLE EXPERIENCE</span>
+        <span>BUILD 0.3.0</span>
+      </footer>
+    </main>
+  );
+}
+
+export default App;
