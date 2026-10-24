@@ -1,0 +1,28 @@
+# .NET
+**/bin/
+**/obj/
+*.user
+*.suo
+
+# Node.js / Vite
+**/node_modules/
+**/dist/
+
+# Środowisko i sekrety
+.env
+.env.*
+!.env.example
+**/secrets.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# System
+.DS_Store
+Thumbs.db

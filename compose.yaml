@@ -1,0 +1,22 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Backend/Dockerfile
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:10000
+    ports:
+      - "5167:10000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    environment:
+      BACKEND_HOST: backend:10000
+    ports:
+      - "3001:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
