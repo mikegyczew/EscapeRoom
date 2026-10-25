@@ -1,128 +1,297 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import "./App.css";
+import {
+  ACTIVE_LEVEL_COUNT,
+  ENABLED_LEVELS,
+  getNextEnabledLevel,
+  isLevelEnabled,
+  LEVELS,
+} from "./levels/registry";
+import type { LevelId } from "./levels/types";
+import Room01 from "./levels/Room01/Room01";
+import Room05 from "./levels/Room05/Room05";
+import Room11 from "./levels/Room11/Room11";
+import Room12 from "./levels/Room12/Room12";
+import Room17 from "./levels/Room17/Room17";
+import Room22 from "./levels/Room22/Room22";
+import Room23 from "./levels/Room23/Room23";
+import Room27 from "./levels/Room27/Room27";
+import Room33 from "./levels/Room33/Room33";
+import Room40 from "./levels/Room40/Room40";
+import Room44 from "./levels/Room44/Room44";
+import Room45 from "./levels/Room45/Room45";
+import Room50 from "./levels/Room50/Room50";
+import Room55 from "./levels/Room55/Room55";
+import Room56 from "./levels/Room56/Room56";
+import Room61 from "./levels/Room61/Room61";
+import Room66 from "./levels/Room66/Room66";
+import Room76 from "./levels/Room76/Room76";
+import Room72 from "./levels/Room72/Room72";
+import Room77 from "./levels/Room77/Room77";
+import Room67 from "./levels/Room67/Room67";
+import Room78 from "./levels/Room78/Room78";
+import Room83 from "./levels/Room83/Room83";
+import Room88 from "./levels/Room88/Room88";
+import Room89 from "./levels/Room89/Room89";
+import Room99 from "./levels/Room99/Room99";
+import {
+  ITEMS,
+  POS,
+  POS_LABEL,
+  POS_SLOT,
+  ROUND_TIMES,
+  TOTAL_ROUNDS,
+} from "./levels/Room34";
+import useRoom34 from "./levels/Room34/useRoom34";
+import {
+  activeLevelPhrase,
+  archiveIntroNarrationFiles,
+  playPolishAudio,
+  stopPolishAudio,
+} from "./shared/speech";
+import { TranslationProvider } from "./shared/translations";
+import { useTranslation } from "./shared/use-translation";
+import { LocalizedText } from "./shared/localized-text";
+import { translationKeyFor } from "./shared/translation-key";
+
 
 type Screen =
+  | "lobby"
   | "intro"
   | "level1"
+  | "room05"
+  | "room11"
+  | "room12"
+  | "room17"
+  | "room22"
+  | "room23"
+  | "room27"
+  | "room33"
+  | "room40"
+  | "room44"
+  | "room45"
+  | "room50"
+  | "room55"
+  | "room61"
+  | "room66"
+  | "room76"
+  | "room72"
+  | "room77"
+  | "room67"
+  | "room78"
+  | "room83"
+  | "room88"
+  | "room89"
+  | "room99"
   | "transition"
   | "level2intro"
   | "level2"
+  | "level3intro"
   | "success"
   | "failed";
 
-type GuessResponse = {
-  correct: boolean;
-  complete?: boolean;
-  nextPosition?: number;
-  binary?: string;
-  message?: string;
+type LoginScreenProps = {
+  initialError?: string;
+  onAuthenticated: (email: string) => void;
 };
 
-type FoundItem = {
-  id: string;
-  name: string;
-  description: string;
-  symbol: string;
-};
+async function getApiError(response: Response): Promise<string> {
+  try {
+    const body: unknown = await response.json();
+    if (typeof body !== "object" || body === null) {
+      return "Nie udało się wykonać tej operacji.";
+    }
 
-// Cztery strony krzyża na tarczy i jedna runda = liczba na każdej stronie.
-type Pos = "left" | "top" | "right" | "bottom";
-type ClockRound = Record<Pos, number>;
-// Godziny wynikające z notatki Henryka. Każda runda ma inny cel.
-const ROUND_TIMES = ["08:30", "04:15", "06:45"];
-
-const PASSWORD = "rozpoczynamy misje";
-
-const MEMORIZE_MS = 5000; // czas zapamiętywania układu
-const REMIND_MS = 3500; // powtórny pokaz po błędnym ułożeniu
-const ROTATE_MS = 2500; // czas obrotu wskazówek po dobrej rundzie
-const TOTAL_ROUNDS = 3;
-const LEVEL2_SECONDS = 300;
-
-const POS: Pos[] = ["left", "top", "right", "bottom"];
-const POS_LABEL: Record<Pos, string> = {
-  left: "LEWO",
-  top: "GÓRA",
-  right: "PRAWO",
-  bottom: "DÓŁ",
-};
-// Która z klas .clock-position-N odpowiada danej stronie tarczy.
-const POS_SLOT: Record<Pos, number> = {
-  left: 10,
-  top: 1,
-  right: 4,
-  bottom: 7,
-};
-
-const ITEMS: FoundItem[] = [
-  {
-    id: "note",
-    name: "Notatka Henryka",
-    description: "Notatka Henryka: „Najważniejsze chwile były zawsze po prawej. Najpierw 8:30, potem 4:15, na końcu 6:45. Nie pomyl krótkiej wskazówki z długą.”",
-    symbol: "📜",
-  },
-  {
-    id: "number12",
-    name: "Cyfra 12",
-    description: "Stara, mosiężna dwunastka.",
-    symbol: "12",
-  },
-  {
-    id: "number3",
-    name: "Cyfra 3",
-    description: "Trójka wyryta w kawałku mosiądzu.",
-    symbol: "3",
-  },
-  {
-    id: "number6",
-    name: "Cyfra 6",
-    description: "Szóstka znaleziona pod biurkiem.",
-    symbol: "6",
-  },
-  {
-    id: "number9",
-    name: "Cyfra 9",
-    description: "Dziewiątka ukryta za starą książką.",
-    symbol: "9",
-  },
-  {
-    id: "hands",
-    name: "Wskazówki zegara",
-    description: "Dwie wskazówki. Jedna krótka, druga długa.",
-    symbol: "🕰️",
-  },
-];
-
-function shuffle<T>(items: T[]): T[] {
-  const copy = [...items];
-
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
+    const details = body as {
+      detail?: unknown;
+      title?: unknown;
+      message?: unknown;
+      errors?: Record<string, string[]>;
+    };
+    const validationErrors = Object.values(details.errors ?? {}).flat();
+    if (validationErrors.length > 0) return validationErrors.join(" ");
+    if (typeof details.detail === "string") return details.detail;
+    if (typeof details.message === "string") return details.message;
+    if (typeof details.title === "string") return details.title;
+  } catch {
+    return "Nie udało się odczytać odpowiedzi serwera.";
   }
 
-  return copy;
+  return "Nie udało się wykonać tej operacji.";
 }
 
-// Losuje trzy rundy. Każda runda to cztery liczby idące co 3
-// (np. 12-3-6-9, 2-5-8-11, 1-4-7-10) ułożone zgodnie z ruchem wskazówek
-// od lewej strony. Kolejność rund i punkt startu w każdej rundzie są losowe,
-// a razem rundy zawierają wszystkie liczby od 1 do 12.
-function makeClockRounds(): ClockRound[] {
-  const groups = shuffle([
-    [12, 3, 6, 9],
-    [2, 5, 8, 11],
-    [1, 4, 7, 10],
-  ]);
+async function getAuthenticatedEmail(response: Response): Promise<string> {
+  const body: unknown = await response.json();
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    !("email" in body) ||
+    typeof body.email !== "string"
+  ) {
+    throw new Error("Serwer zwrócił nieprawidłowe dane konta.");
+  }
+  return body.email;
+}
 
-  return groups.map((group) => {
-    const offset = Math.floor(Math.random() * 4);
-    const round = {} as ClockRound;
-    POS.forEach((pos, index) => {
-      round[pos] = group[(index + offset) % 4];
-    });
-    return round;
-  });
+function LoginScreen({ initialError, onAuthenticated }: LoginScreenProps) {
+  const { text: localizeAttribute } = useTranslation();
+  const { language, setLanguage } = useTranslation();
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [message, setMessage] = useState(initialError ?? "");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage("");
+    if (isRegistering && password !== confirmPassword) {
+      setMessage(localizeAttribute("copy.2438937c", "Hasła nie są takie same."));
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      if (isRegistering) {
+        const registration = await fetch("/api/auth/register", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        if (!registration.ok) {
+          setMessage(await getApiError(registration));
+          return;
+        }
+      }
+
+      const login = await fetch("/api/auth/login?useCookies=true", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!login.ok) {
+        setMessage(
+          login.status === 401
+            ? "Nieprawidłowy adres e-mail lub hasło."
+            : isRegistering
+            ? "Konto utworzono, ale nie udało się zalogować. Spróbuj zalogować się ręcznie."
+            : await getApiError(login),
+        );
+        if (isRegistering) setIsRegistering(false);
+        return;
+      }
+
+      const currentUser = await fetch("/api/auth/me", {
+        credentials: "include",
+      });
+      if (!currentUser.ok) {
+        setMessage(localizeAttribute("copy.9af9808d", "Logowanie nie zostało potwierdzone przez serwer."));
+        return;
+      }
+      onAuthenticated(await getAuthenticatedEmail(currentUser));
+    } catch {
+      setMessage(
+        localizeAttribute("copy.44fbdce3", "Nie można połączyć się z serwerem. Sprawdź, czy aplikacja działa, i spróbuj ponownie."),
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="game-shell">
+      <MatrixRain />
+      <header className="game-header auth-header">
+        <div className="brand">
+          <span className="brand-mark"><LocalizedText translationKey="copy.1d4075e7" fallback={"⌘"} /></span>
+          <span><LocalizedText translationKey="copy.a1be99c2" fallback={"LABORATORIUM "} /><span className="accent"><LocalizedText translationKey="copy.39dcb3b2" fallback={"PROFESORA"} /></span></span>
+        </div>
+        <div className="system-status">
+          <span className="status-dot" />
+          <LocalizedText translationKey="copy.f3f911dd" fallback={"SYSTEM ONLINE "} /></div>
+        <button
+          aria-label={language === "pl" ? "Switch language to English" : "Zmień język na polski"}
+          className="language-toggle"
+          onClick={() => setLanguage(language === "pl" ? "en" : "pl")}
+          type="button"
+        >
+          {language === "pl" ? "EN" : "PL"}
+        </button>
+      </header>
+      <section className="auth-panel">
+        <div className="eyebrow"><LocalizedText translationKey="copy.3517ba87" fallback={"ARCHIWUM HENRY'EGO ARMITAGE'A"} /></div>
+        <h1>
+          <LocalizedText translationKey="copy.e7acfd19" fallback={"WEJDŹ DO "} /><br />
+          <span className="accent"><LocalizedText translationKey="copy.6b76a056" fallback={"LABORATORIUM"} /></span>
+        </h1>
+        <p className="lead">
+          <LocalizedText translationKey="copy.b32efa5a" fallback={"Zaloguj się lub utwórz konto, aby wybrać escape room i kontynuować przygodę. "} /></p>
+        <form className="auth-form" onSubmit={(event) => void submit(event)}>
+          <label>
+            <LocalizedText translationKey="copy.8fa0f8dd" fallback={"ADRES E-MAIL "} /><input
+              autoComplete="email"
+              autoFocus
+              onChange={(event) => setEmail(event.target.value)}
+              required
+              type="email"
+              value={email}
+            />
+          </label>
+          <label>
+            <LocalizedText translationKey="copy.bf5362b1" fallback={"HASŁO "} /><input
+              autoComplete={isRegistering ? "new-password" : "current-password"}
+              minLength={8}
+              onChange={(event) => setPassword(event.target.value)}
+              required
+              type="password"
+              value={password}
+            />
+          </label>
+          {isRegistering && (
+            <label>
+              <LocalizedText translationKey="copy.19d993d8" fallback={"POWTÓRZ HASŁO "} /><input
+                autoComplete="new-password"
+                minLength={8}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                required
+                type="password"
+                value={confirmPassword}
+              />
+            </label>
+          )}
+          <p className="auth-message" aria-live="polite" role="status">
+            {message}
+          </p>
+          <button className="primary-button auth-submit" disabled={submitting} type="submit">
+            {submitting
+              ? <LocalizedText translationKey="copy.80bcdd86" fallback={"ŁĄCZENIE Z ARCHIWUM..."} />
+              : isRegistering
+                ? <LocalizedText translationKey="copy.0eca5487" fallback={"UTWÓRZ KONTO"} />
+                : <LocalizedText translationKey="copy.d52c13d1" fallback={"ZALOGUJ SIĘ"} />}
+            {!submitting && <span> <LocalizedText translationKey="copy.973c7cf5" fallback={"→"} /></span>}
+          </button>
+        </form>
+        <button
+          className="text-button auth-mode-toggle"
+          disabled={submitting}
+          onClick={() => {
+            setIsRegistering((registering) => !registering);
+            setMessage("");
+          }}
+          type="button"
+        >
+          {isRegistering ? <LocalizedText translationKey="copy.d4453a62" fallback={"Masz już konto? Zaloguj się."} /> : <LocalizedText translationKey="copy.73b9a228" fallback={"Nie masz konta? Utwórz je."} />}
+        </button>
+        {isRegistering && (
+          <p className="auth-password-hint">
+            <LocalizedText translationKey="copy.c4d88102" fallback={"Hasło musi mieć co najmniej 8 znaków, w tym jedną cyfrę. "} /></p>
+        )}
+      </section>
+    </main>
+  );
 }
 
 function MatrixRain({ speed = 1 }: { speed?: number }) {
@@ -147,6 +316,281 @@ function MatrixRain({ speed = 1 }: { speed?: number }) {
 }
 
 const MEMORY_WORDS = ["Pamiętam…", "Zapomniałem…", "Która jest godzina?"];
+
+type RoomMapEntry = {
+  label: string;
+  title: string;
+  roomNumbers: number[];
+  levelId?: LevelId;
+};
+
+const ROOM_MAP_SECTORS: {
+  title: string;
+  rooms: RoomMapEntry[];
+}[] = [
+  {
+    title: "PŁAT POTYLICZNY · ZMYSŁY I OBRAZY",
+    rooms: [
+      { label: "01", title: "Pokój Pierwszego Światła", roomNumbers: [1], levelId: "room01" },
+      { label: "05", title: "Kino Rodzinne", roomNumbers: [5], levelId: "room05" },
+      { label: "11", title: "Ślepa Plamka", roomNumbers: [11], levelId: "room11" },
+    ],
+  },
+  {
+    title: "PŁAT SKRONIOWY · SŁUCH I JĘZYK",
+    rooms: [
+      { label: "12", title: "Cisza Absolutna", roomNumbers: [12], levelId: "room12" },
+      { label: "17", title: "Chór Głosów", roomNumbers: [17], levelId: "room17" },
+      { label: "22", title: "Szum Szumów", roomNumbers: [22], levelId: "room22" },
+    ],
+  },
+  {
+    title: "UKŁAD LIMBICZNY · EMOCJE",
+    rooms: [
+      { label: "23", title: "Pokój Napięcia", roomNumbers: [23], levelId: "room23" },
+      { label: "27", title: "Gabinet Straty", roomNumbers: [27], levelId: "room27" },
+      { label: "33", title: "Labirynt Amigdali", roomNumbers: [33], levelId: "room33" },
+    ],
+  },
+  {
+    title: "HIPOKAMP · CZAS I ZAPIS",
+    rooms: [
+      { label: "34", title: "Zatrzymana Wskazówka", roomNumbers: [34], levelId: "room34" },
+      { label: "40", title: "Pętla Czasowa", roomNumbers: [40], levelId: "room40" },
+      { label: "44", title: "Próg Zapomnienia", roomNumbers: [44], levelId: "room44" },
+    ],
+  },
+  {
+    title: "PŁAT CZUCIOWO-RUCHOWY · RUCH",
+    rooms: [
+      { label: "45", title: "Test Rysowania Zegara", roomNumbers: [45], levelId: "room45" },
+      { label: "50", title: "Drżąca Ręka", roomNumbers: [50], levelId: "room50" },
+      { label: "55", title: "Paraliż Senny", roomNumbers: [55], levelId: "room55" },
+    ],
+  },
+  {
+    title: "PŁAT CZOŁOWY · LOGIKA I DECYZJE",
+    rooms: [
+      { label: "56", title: "Złamany Algorytm", roomNumbers: [56], levelId: "room56" },
+      { label: "61", title: "Szachy z Cieniem", roomNumbers: [61], levelId: "room61" },
+      { label: "66", title: "Granice Eksperymentu", roomNumbers: [66], levelId: "room66" },
+    ],
+  },
+  {
+    title: "OBSZAR BROKI I WERNICKEGO · JĘZYK",
+    rooms: [
+      { label: "67", title: "Wieża Babel", roomNumbers: [67], levelId: "room67" },
+      { label: "72", title: "Afazja", roomNumbers: [72], levelId: "room72" },
+      { label: "76", title: "Słownik Pamięci", roomNumbers: [76], levelId: "room76" },
+      { label: "77", title: "Ostatnie Zdanie", roomNumbers: [77], levelId: "room77" },
+    ],
+  },
+  {
+    title: "ISTOTA BIAŁA · CHAOS I DEGENERACJA",
+    rooms: [
+      { label: "78", title: "Labirynt bez Wyjścia", roomNumbers: [78], levelId: "room78" },
+      { label: "83", title: "Zgubiłem Nazwisko", roomNumbers: [83], levelId: "room83" },
+      { label: "88", title: "Krawędź Zsypu", roomNumbers: [88], levelId: "room88" },
+    ],
+  },
+  {
+    title: "JĄDRO ŚWIADOMOŚCI · OSTATNIE WSPOMNIENIE",
+    rooms: [
+      {
+        label: "89–98",
+        title: "Białe pokoje — gasnące synapsy",
+        roomNumbers: Array.from({ length: 10 }, (_, index) => index + 89),
+        levelId: "room89",
+      },
+      { label: "99", title: "Punkt Omega", roomNumbers: [99], levelId: "room99" },
+    ],
+  },
+];
+
+const ROOM_TRANSITIONS: Partial<Record<LevelId, Partial<Record<LevelId, string>>>> = {
+  room01: {
+    room05: "Impuls prowadzi do Pokoju 5 — rodzinnego filmu ukrytego w płacie potylicznym.",
+  },
+  room05: {
+    room11: "Odzyskane klatki filmu ujawniają drogę do optycznej zagadki Pokoju 11.",
+  },
+  room11: {
+    room12: "Ukryte przejście prowadzi do Pokoju 12 i zapisu wibracji z wyciszonej komory.",
+  },
+  room12: {
+    room17: "Odtworzony rytm otwiera kanał do Pokoju 17, gdzie nakładają się archiwalne głosy.",
+  },
+  room17: {
+    room22: "Oryginalny głos wskazuje częstotliwość ukrytą w szumie Pokoju 22.",
+  },
+  room22: {
+    room23: "Odnaleziony sygnał prowadzi do Pokoju 23, gdzie zegar przechowuje rytm wspomnień.",
+  },
+  room23: {
+    room27: "Uspokojony mechanizm odsłania listy Henry'ego i Rose w Pokoju 27.",
+  },
+  room27: {
+    room33: "Ułożone chronologicznie listy wskazują drogę przez Labirynt Amigdali.",
+  },
+  room33: {
+    room34: "Odnaleziony korytarz łączy układ limbiczny z zapisem czasu w Pokoju 34.",
+  },
+  room34: {
+    room40: "Odtworzony zegar otwiera pętlę czasu w Pokoju 40.",
+  },
+  room40: {
+    room44: "Przerwana pętla odsłania Próg Zapomnienia w Pokoju 44.",
+  },
+  room44: {
+    room45: "Odzyskany pierwszy impuls wskazuje tarczę do odtworzenia w Pokoju 45.",
+  },
+  room45: {
+    room50: "Ustawiona tarcza prowadzi do próby stabilizacji sygnału w Pokoju 50.",
+  },
+  room50: {
+    room55: "Ustabilizowany zapis pozwala wejść w cichy sen Pokoju 55.",
+  },
+  room55: {
+    room56: "Odnaleziony spokojny rytm otwiera drogę do Pokoju 56.",
+  },
+  room56: {
+    room61: "Odzyskany algorytm wyznacza kolejną ścieżkę do partii szachów Profesora.",
+  },
+  room61: {
+    room66: "Odtworzona partia prowadzi do etycznej decyzji w Pokoju 66.",
+  },
+  room66: {
+    room76: "Decyzja o ochronie wspomnień pozwala odczytać Słownik Pamięci.",
+  },
+  room76: {
+    room72: "Odzyskane znaczenia otwierają komunikację symbolami w Pokoju 72.",
+  },
+  room72: {
+    room77: "Uzgodniony słownik pozwala połączyć fragmenty Ostatniego Zdania.",
+  },
+  room77: {
+    room67: "Ostatnie zdanie przywraca słowa i prowadzi do pomieszanego słownika Pokoju 67.",
+  },
+  room67: {
+    room78: "Uzgodnione nazwy odsłaniają nową perspektywę w Labiryncie bez Wyjścia.",
+  },
+  room78: {
+    room83: "Odnaleziona droga prowadzi do archiwum nazwisk Profesora.",
+  },
+  room83: {
+    room88: "Potwierdzona sygnatura otwiera bezpieczne przejście przez Krawędź Zsypu.",
+  },
+  room88: {
+    room89: "Bezpieczny szlak prowadzi do ostatnich białych pokoi, gdzie gasnące synapsy czekają na przywrócenie.",
+  },
+  room89: {
+    room99: "Odzyskane światła zbiegają się w Punkcie Omega — ostatnim zapisie świadomości Henry'ego.",
+  },
+};
+
+function RoomMapModal({
+  currentRoomNumber,
+  onClose,
+}: {
+  currentRoomNumber?: number;
+  onClose: () => void;
+}) {
+  const { text: localizeAttribute } = useTranslation();
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  return (
+    <div
+      className="room-map-backdrop"
+      onClick={onClose}
+      role="presentation"
+    >
+      <section
+        aria-labelledby="room-map-title"
+        aria-modal="true"
+        className="room-map-modal"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <div className="room-map-heading">
+          <div>
+            <p className="eyebrow"><LocalizedText translationKey="copy.41442f68" fallback={"ARCHIWUM PAMIĘCI // MAPA POŁĄCZEŃ"} /></p>
+            <h2 id="room-map-title"><LocalizedText translationKey="copy.be77c00c" fallback={"LABIRYNT 99 POKOI"} /></h2>
+          </div>
+          <button
+            aria-label={localizeAttribute("copy.9d4733dc", "Zamknij mapę pokoi")}
+            className="room-map-close"
+            onClick={onClose}
+            type="button"
+          >
+            <LocalizedText translationKey="copy.9dbb32c2" fallback={"× "} /></button>
+        </div>
+        <p className="room-map-description">
+          <LocalizedText translationKey="copy.e04387ba" fallback={"Mapa pokazuje tylko pokoje opisane w koncepcji. Wyróżnione pozycje są grywalnymi misjami; skróty synaptyczne łączą odległe strefy. "} /></p>
+        <div className="room-map-legend">
+          <span><i className="room-map-legend-active" /> <LocalizedText translationKey="copy.a4e5eb5c" fallback={"MISJA W KAMPANII"} /></span>
+          {currentRoomNumber && (
+            <span><i className="room-map-legend-current" /> <LocalizedText translationKey="copy.a51250d1" fallback={"TWOJA LOKALIZACJA"} /></span>
+          )}
+        </div>
+        <div className="room-map-sectors">
+          {ROOM_MAP_SECTORS.map((sector, sectorIndex) => (
+            <section className="room-map-sector" key={localizeAttribute(translationKeyFor(sector.title), sector.title)}>
+              <h3>
+                <LocalizedText translationKey="copy.bf981b3a" fallback={"STREFA "} />{String(sectorIndex + 1).padStart(2, "0")}{" "}
+                <span><LocalizedText fallback={sector.title} /></span>
+              </h3>
+              <div className="room-map-grid">
+                {sector.rooms.map((room) => {
+                  const isActive = room.levelId
+                    ? isLevelEnabled(room.levelId)
+                    : false;
+                  const isCurrent = room.roomNumbers.includes(currentRoomNumber ?? -1);
+                  const classes = [
+                    "room-map-cell",
+                    isActive ? "is-active" : "",
+                    isCurrent ? "is-current" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
+
+                  return (
+                    <div
+                      aria-current={isCurrent ? "location" : undefined}
+                      aria-label={[
+                        `Pokój ${room.label}`,
+                        room.title,
+                        isActive ? "misja w kampanii" : "",
+                        isCurrent ? "twoja lokalizacja" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" — ")}
+                      className={classes}
+                      key={localizeAttribute(translationKeyFor(room.label), room.label)}
+                      title={localizeAttribute("copy.8e3d6307", "Pokój {number} — {title}", {
+                        number: room.label,
+                        title: localizeAttribute(translationKeyFor(room.title), room.title),
+                      })}
+                    >
+                      <span><LocalizedText fallback={room.label} /></span>
+                      <small><LocalizedText fallback={room.title} /></small>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
 
 // Unoszące się w tle cyfry 1–12, które układają się w tarczę zegara.
 // mode="cycle": napisy zmieniają się co kilka sekund, cyfry tworzą zegar,
@@ -300,202 +744,325 @@ function formatTime(seconds: number) {
   return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
 }
 
-function App() {
-  const [screen, setScreen] = useState<Screen>("intro");
+function AppContent() {
+  const { text: localizeAttribute } = useTranslation();
+  const { error: translationError, language, setLanguage } = useTranslation();
+  const [screen, setScreen] = useState<Screen>("lobby");
+  const [authChecked, setAuthChecked] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [authNotice, setAuthNotice] = useState("");
+  const [completedLevelId, setCompletedLevelId] = useState<LevelId>("room01");
+  const [ethicalChoice, setEthicalChoice] = useState<"privacy" | "research" | null>(null);
+  const [finalDecision, setFinalDecision] = useState<"privacy" | "research" | null>(null);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [roomMapOpen, setRoomMapOpen] = useState(false);
   const [backendWarming, setBackendWarming] = useState(false);
   const [backendMessage, setBackendMessage] = useState("");
 
-  // Polski narrator Piper — nagrania przechowywane lokalnie.
-  const narrationAudioRef = useRef<HTMLAudioElement | null>(null);
-  const narrationQueueRef = useRef<string[]>([]);
-  const narrationIndexRef = useRef(0);
-  const narrationSkippedRef = useRef(false);
-
-  const stopNarration = () => {
-    narrationSkippedRef.current = true;
-    narrationQueueRef.current = [];
-    narrationIndexRef.current = 0;
-
-    const audio = narrationAudioRef.current;
-
-    if (audio) {
-      audio.pause();
-      audio.currentTime = 0;
-      audio.onended = null;
-      audio.onerror = null;
-      narrationAudioRef.current = null;
-    }
-  };
-
-  const playNarration = (files: string[]) => {
-    stopNarration();
-
-    narrationSkippedRef.current = false;
-    narrationQueueRef.current = files;
-    narrationIndexRef.current = 0;
-
-    const playNext = () => {
-      if (narrationSkippedRef.current) return;
-
-      const currentFiles = narrationQueueRef.current;
-      const index = narrationIndexRef.current;
-
-      if (index >= currentFiles.length) {
-        narrationAudioRef.current = null;
-        return;
-      }
-
-      const audio = new Audio(currentFiles[index]);
-      narrationAudioRef.current = audio;
-
-      audio.onended = () => {
-        if (narrationAudioRef.current !== audio) return;
-
-        narrationIndexRef.current += 1;
-        playNext();
-      };
-
-      audio.onerror = () => {
-        if (narrationAudioRef.current !== audio) return;
-
-        narrationIndexRef.current += 1;
-        playNext();
-      };
-
-      void audio.play().catch(() => {
-        if (narrationAudioRef.current !== audio) return;
-
-        narrationIndexRef.current += 1;
-        playNext();
-      });
-    };
-
-    playNext();
-  };
-
-  // Level 1
-  const [position, setPosition] = useState(0);
-  const [guess, setGuess] = useState("");
-  const [decoded, setDecoded] = useState<string[]>([]);
-  const [attempts, setAttempts] = useState(0);
-  const [errors, setErrors] = useState(0);
-  const [level1Started, setLevel1Started] = useState<number | null>(null);
-  const [level1Seconds, setLevel1Seconds] = useState(0);
-  const [feedback, setFeedback] = useState("");
-
-  // Level 2
-  const [found, setFound] = useState<string[]>([]);
-  const [selectedObject, setSelectedObject] = useState<FoundItem | null>(null);
-  // Kolejność zawsze jak w POS: lewo, góra, prawo, dół.
-  const [clockSlots, setClockSlots] = useState<string[]>(Array(4).fill(""));
-  const [secondsLeft, setSecondsLeft] = useState(LEVEL2_SECONDS);
-  const [level2Attempts, setLevel2Attempts] = useState(0);
-  const [clockMessage, setClockMessage] = useState("");
-  const [allFlipped, setAllFlipped] = useState(false);
-  const [clockRound, setClockRound] = useState(1);
-  const [clockRounds, setClockRounds] = useState<ClockRound[]>(() =>
-    makeClockRounds(),
-  );
-  const [clockMemorizing, setClockMemorizing] = useState(false);
-  const [clockRotating, setClockRotating] = useState(false);
-  const [clockReading, setClockReading] = useState(false);
-  const [selectedTime, setSelectedTime] = useState("");
-  const [clockRoundsCompleted, setClockRoundsCompleted] = useState(0);
-  const [handSpins, setHandSpins] = useState(0);
-  const progress = Math.min(position, PASSWORD.length);
-
-  // Wszystkie timeouty trzymamy w jednym miejscu, żeby można je było
-  // czyścić przy resecie, zmianie ekranu i odmontowaniu komponentu.
-  const timeoutsRef = useRef<number[]>([]);
-
-  function schedule(callback: () => void, delay: number) {
-    const id = window.setTimeout(() => {
-      timeoutsRef.current = timeoutsRef.current.filter((t) => t !== id);
-      callback();
-    }, delay);
-    timeoutsRef.current.push(id);
-  }
-
-  function clearTimers() {
-    timeoutsRef.current.forEach((id) => window.clearTimeout(id));
-    timeoutsRef.current = [];
-  }
-
-  useEffect(() => clearTimers, []);
+  const firstEnabledLevel = ENABLED_LEVELS[0];
+  const nextEnabledLevel = getNextEnabledLevel(completedLevelId);
+  const activeMissionLabel =
+    ACTIVE_LEVEL_COUNT === 1
+      ? "aktywna misja"
+      : ACTIVE_LEVEL_COUNT >= 2 && ACTIVE_LEVEL_COUNT <= 4
+        ? "aktywne misje"
+        : "aktywnych misji";
+  const activeLevelDescription = activeLevelPhrase(ACTIVE_LEVEL_COUNT);
+  const level2 = useRoom34({
+    active: screen === "level2",
+    onBegin: () => setScreen("level2"),
+    onComplete: () => {
+      setCompletedLevelId("room34");
+      setScreen("success");
+    },
+    onFailure: () => setScreen("failed"),
+  });
+  const {
+    found,
+    selectedObject,
+    setSelectedObject,
+    clockSlots,
+    secondsLeft,
+    level2Attempts,
+    clockMessage,
+    clockRound,
+    clockRoundsCompleted,
+    clockMemorizing,
+    clockRotating,
+    clockReading,
+    selectedTime,
+    setSelectedTime,
+    clockTarget,
+    choices,
+    usedDigits,
+    showDigits,
+    targetTime,
+    minuteAngle,
+    hourAngle,
+    handTransition,
+    handOpacity,
+    collectItem,
+    setClockSlot,
+    resetClockShuffle,
+    beginMission: beginClockMission,
+    checkClock,
+    answerTime,
+  } = level2;
+  const currentRoomNumber =
+    screen === "level1"
+      ? 1
+      : screen === "room05"
+        ? 5
+        : screen === "room11"
+          ? 11
+            : screen === "room12"
+              ? 12
+              : screen === "room17"
+                ? 17
+                : screen === "room22"
+                  ? 22
+                    : screen === "room23"
+                      ? 23
+                      : screen === "room27"
+                        ? 27
+                        : screen === "room33"
+                          ? 33
+                          : screen === "room40"
+                            ? 40
+                            : screen === "room44"
+                              ? 44
+                              : screen === "room45"
+                                ? 45
+                                : screen === "room50"
+                                  ? 50
+                                  : screen === "room55"
+                                    ? 55
+                                    : screen === "room61"
+                                      ? 61
+                                      : screen === "room66"
+                                        ? 66
+                                        : screen === "room76"
+                                          ? 76
+                                          : screen === "room72"
+                                            ? 72
+                                            : screen === "room77"
+                                              ? 77
+                                              : screen === "room67"
+                                                ? 67
+                                                : screen === "room78"
+                                                  ? 78
+                                                  : screen === "room83"
+                                                    ? 83
+                                                    : screen === "room88"
+                                                      ? 88
+                                                      : screen === "room89"
+                                                        ? 89
+                                                        : screen === "room99"
+                                                          ? 99
+        : screen === "level2intro" || screen === "level2"
+        ? 34
+        : screen === "level3intro"
+          ? 56
+          : screen === "transition" || screen === "success" || screen === "failed"
+            ? ({
+                room01: 1,
+                room05: 5,
+                room11: 11,
+                room12: 12,
+                room17: 17,
+                room22: 22,
+                room23: 23,
+                room27: 27,
+                room33: 33,
+                room34: 34,
+                room40: 40,
+                room44: 44,
+                room45: 45,
+                room50: 50,
+                room55: 55,
+                room56: 56,
+                room61: 61,
+                room66: 66,
+                room76: 76,
+                room72: 72,
+                room77: 77,
+                room67: 67,
+                room78: 78,
+                room83: 83,
+                room88: 88,
+                room89: 89,
+                room99: 99,
+              } as const)[completedLevelId]
+            : undefined;
 
     useEffect(() => {
-    if (!voiceEnabled) {
-      stopNarration();
-      return;
+      let active = true;
+      void fetch("/api/auth/me", { credentials: "include" })
+        .then(async (response) => {
+          if (!active) return;
+          if (response.status === 401) {
+            setUserEmail(null);
+            return;
+          }
+          if (!response.ok) {
+            throw new Error(await getApiError(response));
+          }
+          setUserEmail(await getAuthenticatedEmail(response));
+        })
+        .catch((error: unknown) => {
+          if (active) {
+            setUserEmail(null);
+            setAuthNotice(error instanceof Error
+              ? error.message
+              : "Nie można połączyć się z serwerem logowania. Sprawdź, czy aplikacja działa.");
+          }
+        })
+        .finally(() => {
+          if (active) setAuthChecked(true);
+        });
+
+      return () => {
+        active = false;
+      };
+    }, []);
+
+    useEffect(() => {
+      if (!authChecked || !userEmail || !voiceEnabled) {
+        stopPolishAudio();
+        return;
     }
 
     switch (screen) {
+      case "lobby":
+        stopPolishAudio();
+        break;
+
       case "intro":
-        playNarration([
-          "/audio/prologue_01.wav",
-          "/audio/prologue_02.wav",
-          "/audio/prologue_03.wav",
-          "/audio/prologue_04.wav",
-        ]);
+        playPolishAudio(archiveIntroNarrationFiles(ACTIVE_LEVEL_COUNT));
         break;
 
       case "level1":
-        playNarration(["/audio/prologue_05.wav"]);
+        playPolishAudio(["/audio/narration/room01-intro.mp3"]);
+        break;
+
+      case "room05":
+        playPolishAudio(["/audio/narration/room05-intro.mp3"]);
+        break;
+
+      case "room11":
+        playPolishAudio(["/audio/narration/room11-intro.mp3"]);
+        break;
+
+      case "room12":
+        playPolishAudio(["/audio/narration/room12-intro.mp3"]);
+        break;
+
+      case "room17":
+        playPolishAudio(["/audio/narration/room17-intro.mp3"]);
+        break;
+
+      case "room22":
+        playPolishAudio(["/audio/narration/room22-intro.mp3"]);
+        break;
+
+      case "room23":
+        playPolishAudio(["/audio/narration/room23-intro.mp3"]);
+        break;
+
+      case "room27":
+        playPolishAudio(["/audio/narration/room27-intro.mp3"]);
+        break;
+
+      case "room33":
+        playPolishAudio(["/audio/narration/room33-intro.mp3"]);
+        break;
+
+      case "room40":
+        playPolishAudio(["/audio/narration/room40-intro.mp3"]);
+        break;
+
+      case "room44":
+        playPolishAudio(["/audio/narration/room44-intro.mp3"]);
+        break;
+
+      case "room45":
+        playPolishAudio(["/audio/narration/room45-intro.mp3"]);
+        break;
+
+      case "room50":
+        playPolishAudio(["/audio/narration/room50-intro.mp3"]);
+        break;
+
+      case "room55":
+        playPolishAudio(["/audio/narration/room55-intro.mp3"]);
+        break;
+
+      case "room61":
+        playPolishAudio(["/audio/narration/room61-intro.mp3"]);
+        break;
+
+      case "room66":
+        playPolishAudio(["/audio/narration/room66-intro.mp3"]);
+        break;
+
+      case "room76":
+        playPolishAudio(["/audio/narration/room76-intro.mp3"]);
+        break;
+
+      case "room72":
+        playPolishAudio(["/audio/narration/room72-intro.mp3"]);
+        break;
+
+      case "room77":
+        playPolishAudio(["/audio/narration/room77-intro.mp3"]);
+        break;
+
+      case "room67":
+        playPolishAudio(["/audio/narration/room67-intro.mp3"]);
+        break;
+
+      case "room78":
+        playPolishAudio(["/audio/narration/room78-intro.mp3"]);
+        break;
+
+      case "room83":
+        playPolishAudio(["/audio/narration/room83-intro.mp3"]);
+        break;
+
+      case "room88":
+        playPolishAudio(["/audio/narration/room88-intro.mp3"]);
+        break;
+
+      case "room89":
+        playPolishAudio(["/audio/narration/room89-intro.mp3"]);
+        break;
+
+      case "room99":
+        playPolishAudio(["/audio/narration/room99-intro.mp3"]);
         break;
 
       case "level2intro":
-        playNarration(["/audio/prologue_06.wav"]);
+        playPolishAudio(["/audio/narration/room34-intro.mp3"]);
+        break;
+
+      case "level3intro":
         break;
 
       default:
-        stopNarration();
+        stopPolishAudio();
         break;
     }
 
     return () => {
-      stopNarration();
+      stopPolishAudio();
     };
-  }, [screen, voiceEnabled]);
-
-  // Timer pierwszego poziomu.
-  useEffect(() => {
-    if (screen !== "level1" || level1Started === null) return;
-
-    const timer = window.setInterval(() => {
-      setLevel1Seconds(Math.floor((Date.now() - level1Started) / 1000));
-    }, 1000);
-
-    return () => window.clearInterval(timer);
-  }, [screen, level1Started]);
-
-  // Pięciominutowy timer drugiego poziomu (tylko odlicza).
-  useEffect(() => {
-    if (screen !== "level2") return;
-
-    const timer = window.setInterval(() => {
-      setSecondsLeft((previous) => Math.max(0, previous - 1));
-    }, 1000);
-
-    return () => window.clearInterval(timer);
-  }, [screen]);
-
-  // Koniec czasu -> porażka. Wyniesione z updatera setState.
-  useEffect(() => {
-    if (screen === "level2" && secondsLeft <= 0) {
-      clearTimers();
-      setClockMemorizing(false);
-      setClockRotating(false);
-      setClockReading(false);
-      setScreen("failed");
-    }
-  }, [screen, secondsLeft]);
+  }, [screen, voiceEnabled, activeLevelDescription, authChecked, userEmail]);
 
   async function warmBackendAndStart() {
     if (backendWarming) return;
 
     setBackendWarming(true);
-    setBackendMessage("INICJALIZACJA SYSTEMU...");
+    setBackendMessage(localizeAttribute("copy.9056d45f", "INICJALIZACJA SYSTEMU..."));
 
     let lastError = "";
 
@@ -527,7 +1094,7 @@ function App() {
           // Sprawdźmy, czy odpowiedź jest prawidłowym JSON-em.
           await response.json();
 
-          setBackendMessage("SYSTEM GOTOWY. OTWIERAM PIERWSZĄ MISJĘ...");
+          setBackendMessage(localizeAttribute("copy.41760c1a", "SYSTEM GOTOWY. OTWIERAM PIERWSZĄ MISJĘ..."));
           startLevel1();
           return;
         } catch (error) {
@@ -555,693 +1122,716 @@ function App() {
   }
 
   function startLevel1() {
-    clearTimers();
-    setPosition(0);
-    setGuess("");
-    setDecoded([]);
-    setAttempts(0);
-    setErrors(0);
-    setFeedback("");
-    setLevel1Seconds(0);
-    setLevel1Started(Date.now());
+    if (!isLevelEnabled("room01")) return;
     setScreen("level1");
   }
 
-  async function submitGuess(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function startLevelById(levelId: LevelId) {
+    if (!isLevelEnabled(levelId)) return;
 
-    const value = guess.trim().toLowerCase();
-    if (!value) return;
-
-    setAttempts((previous) => previous + 1);
-    setFeedback("");
-
-    let nextPosition = position;
-    let hadError = false;
-    const newCharacters = [...decoded];
-
-    try {
-      for (const character of value) {
-        if (nextPosition >= PASSWORD.length) break;
-
-        const response = await fetch("/api/puzzles/first/guess", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            position: nextPosition,
-            letter: character,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error(`Błąd API: ${response.status}`);
-        }
-
-        const result = (await response.json()) as GuessResponse;
-
-        if (!result.correct) {
-          hadError = true;
-          setErrors((previous) => previous + 1);
-          setFeedback(result.message || "BŁĘDNY ZNAK. SPRÓBUJ PONOWNIE.");
-          break;
-        }
-
-        newCharacters[nextPosition] = character;
-        nextPosition += 1;
-      }
-
-      setDecoded(newCharacters);
-      setPosition(nextPosition);
-      setGuess("");
-
-      if (nextPosition >= PASSWORD.length) {
-        setFeedback("SZYFR ZŁAMANY. DRZWI ZOSTAŁY OTWARTE.");
-        schedule(() => setScreen("transition"), 1000);
-      } else if (!hadError && nextPosition > position) {
-        setFeedback("ZNAK ZAAKCEPTOWANY. KONTYNUUJ.");
-      }
-    } catch {
-      setFeedback(
-        "Nie można połączyć się z API. Sprawdź, czy backend działa na porcie 5166.",
-      );
+    switch (levelId) {
+      case "room01":
+        void warmBackendAndStart();
+        break;
+      case "room34":
+        startLevel2();
+        break;
+      case "room56":
+        startLevel3();
+        break;
+      case "room05":
+        setScreen("room05");
+        break;
+      case "room11":
+        setScreen("room11");
+        break;
+      case "room12":
+        setScreen("room12");
+        break;
+      case "room17":
+        setScreen("room17");
+        break;
+      case "room22":
+        setScreen("room22");
+        break;
+      case "room23":
+        setScreen("room23");
+        break;
+      case "room27":
+        setScreen("room27");
+        break;
+      case "room33":
+        setScreen("room33");
+        break;
+      case "room40":
+        setScreen("room40");
+        break;
+      case "room44":
+        setScreen("room44");
+        break;
+      case "room45":
+        setScreen("room45");
+        break;
+      case "room50":
+        setScreen("room50");
+        break;
+      case "room55":
+        setScreen("room55");
+        break;
+      case "room61":
+        setScreen("room61");
+        break;
+      case "room66":
+        setScreen("room66");
+        break;
+      case "room76":
+        setScreen("room76");
+        break;
+      case "room72":
+        setScreen("room72");
+        break;
+      case "room77":
+        setScreen("room77");
+        break;
+      case "room67":
+        setScreen("room67");
+        break;
+      case "room78":
+        setScreen("room78");
+        break;
+      case "room83":
+        setScreen("room83");
+        break;
+      case "room88":
+        setScreen("room88");
+        break;
+      case "room89":
+        setScreen("room89");
+        break;
+      case "room99":
+        setScreen("room99");
+        break;
     }
   }
 
-  // Zaczyna rundę: pokazuje cztery liczby tej rundy na ms milisekund, potem je ukrywa.
-  // Układ rund jest losowany raz na całą misję (makeClockRounds), nie przy każdej rundzie.
-  function beginMemorization(round: number, message: string, ms = MEMORIZE_MS) {
-    clearTimers();
-    setClockRound(round);
-    setClockSlots(Array(4).fill(""));
-    setClockRotating(false);
-    setClockReading(false);
-    setClockMemorizing(true);
-    setClockMessage(message);
+  function startFirstEnabledLevel() {
+    if (!firstEnabledLevel) return;
+    if (firstEnabledLevel.id === "room01") {
+      void warmBackendAndStart();
+      return;
+    }
+    startLevelById(firstEnabledLevel.id);
+  }
 
-    schedule(() => {
-      setClockMemorizing(false);
-      setClockMessage(
-        "Zapomniałem… gdzie które stało? Ułóż liczby na swoich miejscach.",
-      );
-    }, ms);
+  function startNextEnabledLevel() {
+    if (!nextEnabledLevel) return;
+    startLevelById(nextEnabledLevel.id);
+  }
+
+  function continueAfterLevel(levelId: LevelId) {
+    setCompletedLevelId(levelId);
+    setScreen("transition");
+  }
+
+  function continueAfterEthicalChoice(choice: "privacy" | "research") {
+    setEthicalChoice(choice);
+    continueAfterLevel("room66");
   }
 
   function startLevel2() {
-    clearTimers();
-    setFound([]);
-    setSelectedObject(null);
-    setClockSlots(Array(4).fill(""));
-    setClockRounds(makeClockRounds());
-    setClockRound(1);
-    setClockRoundsCompleted(0);
-    setClockMemorizing(false);
-    setClockRotating(false);
-    setClockReading(false);
-    setSelectedTime("");
-    setSecondsLeft(LEVEL2_SECONDS);
-    setLevel2Attempts(0);
-    setClockMessage("");
+    if (!isLevelEnabled("room34")) return;
+    level2.reset();
     setScreen("level2intro");
   }
 
-  function beginClockMission() {
-    setSecondsLeft(LEVEL2_SECONDS);
-    setClockRoundsCompleted(0);
-    setLevel2Attempts(0);
-    setClockRounds(makeClockRounds());
-    setSelectedTime("");
-    setScreen("level2");
-    beginMemorization(1, `Runda 1/${TOTAL_ROUNDS}. Pamiętam… zapamiętaj liczby!`);
+  function startLevel3() {
+    if (!isLevelEnabled("room56")) return;
+    setScreen("level3intro");
   }
 
-  function collectItem(item: FoundItem) {
-    if (found.includes(item.id)) {
-      setSelectedObject(item);
-      return;
-    }
-
-    setFound((previous) => [...previous, item.id]);
-    setSelectedObject(item);
-    if (!clockMemorizing) {
-      setClockMessage(`Odnaleziono: ${item.name}`);
-    }
-  }
-
-  function setClockSlot(index: number, value: string) {
-    setClockSlots((previous) => {
-      // Każda liczba może być użyta tylko raz.
-      if (value && previous.some((slot, i) => i !== index && slot === value)) {
-        return previous;
+  async function logout() {
+    try {
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!response.ok) {
+        setAuthNotice(await getApiError(response));
+        return;
       }
-      return previous.map((slot, i) => (i === index ? value : slot));
-    });
+      setUserEmail(null);
+      setAuthNotice("");
+      setRoomMapOpen(false);
+      setScreen("lobby");
+    } catch {
+      setAuthNotice(localizeAttribute("copy.f516ed10", "Nie udało się wylogować. Sprawdź połączenie z serwerem."));
+    }
   }
 
-  // Reset: nowy, losowy zestaw rund i pierwsza runda od początku.
-  function resetClockShuffle() {
-    if (clockRotating) return;
-    setClockRounds(makeClockRounds());
-    setClockRoundsCompleted(0);
-    setSelectedTime("");
-    beginMemorization(
-      1,
-      `Runda 1/${TOTAL_ROUNDS}. Pamiętam… zapamiętaj nowy układ!`,
+  if (!authChecked) {
+    return (
+      <main className="game-shell">
+        <MatrixRain />
+        <p className="auth-loading" role="status"><LocalizedText translationKey="copy.51bc0105" fallback={"ŁĄCZENIE Z LABORATORIUM..."} /></p>
+      </main>
     );
   }
 
-  function checkClock() {
-    if (clockMemorizing || clockRotating || clockReading) {
-      setClockMessage("Poczekaj, aż zegar zakończy ruch.");
-      return;
-    }
-
-    const hasAllItems = ITEMS.every((item) => found.includes(item.id));
-
-    if (!hasAllItems) {
-      setClockMessage("Najpierw odnajdź wszystkie elementy w pokoju.");
-      return;
-    }
-
-    // Wszystkie 4 pola muszą być wypełnione, bez powtórzeń.
-    if (clockSlots.some((slot) => slot === "")) {
-      setClockMessage("Uzupełnij wszystkie 4 pozycje.");
-      return;
-    }
-
-    setLevel2Attempts((previous) => previous + 1);
-
-    const correct = clockSlots.every(
-      (slot, index) => slot === clockTarget[index],
-    );
-
-    if (!correct) {
-      beginMemorization(
-        clockRound,
-        "Nie tak. Henryk przypomina układ jeszcze raz…",
-        REMIND_MS,
-      );
-      return;
-    }
-
-    // Wskazówki zatrzymują się na godzinie z notatki Henryka.
-    setSelectedTime("");
-    setHandSpins((previous) => previous + 1);
-    setClockRotating(true);
-    setClockMessage("Dobrze! Mechanizm obraca wskazówki...");
-
-    schedule(() => {
-      setClockRotating(false);
-      setClockReading(true);
-      setClockMessage(
-        clockRound === 1
-          ? "Odczytaj godzinę z tarczy. Zwróć uwagę na obie wskazówki."
-          : `Ustaw godzinę ${ROUND_TIMES[clockRound - 1]} z notatki Henryka.`,
-      );
-    }, ROTATE_MS);
-  }
-
-  // Runda 1 sprawdza odczyt tarczy; rundy 2–3 wymagają ustawienia czasu.
-  function answerTime(value: string) {
-    if (!clockReading) return;
-
-    setLevel2Attempts((previous) => previous + 1);
-
-    const expected = ROUND_TIMES[clockRound - 1];
-
-    if (value !== expected) {
-      setClockMessage(
-        clockRound === 1
-          ? "Nieprawidłowy odczyt. Sprawdź położenie krótkiej i długiej wskazówki."
-          : "To nie ta godzina. Sprawdź notatkę Henryka i ustaw obie wskazówki.",
-      );
-      return;
-    }
-
-    setClockReading(false);
-    setSelectedTime("");
-    const completed = clockRoundsCompleted + 1;
-    setClockRoundsCompleted(completed);
-    setClockSlots(Array(4).fill(""));
-
-    if (completed >= TOTAL_ROUNDS) {
-      setClockMessage("TIK... TAK... MECHANIZM ZASKOCZYŁ!");
-      schedule(() => setScreen("success"), 1200);
-      return;
-    }
-
-    beginMemorization(
-      completed + 1,
-      `Runda ${completed + 1}/${TOTAL_ROUNDS}. Pamiętam… zapamiętaj nowe liczby!`,
+  if (!userEmail) {
+    return (
+      <LoginScreen
+        initialError={authNotice}
+        onAuthenticated={(email) => {
+          setUserEmail(email);
+          setAuthNotice("");
+          setScreen("lobby");
+        }}
+      />
     );
   }
-
-  // Liczby bieżącej rundy w kolejności lewo, góra, prawo, dół.
-  const currentRound = clockRounds[Math.min(clockRound, TOTAL_ROUNDS) - 1];
-  const clockTarget = POS.map((pos) => String(currentRound[pos]));
-  // Rozsypanka nadal wykorzystuje cztery liczby z bieżącej rundy.
-  const choices = [...clockTarget].sort((a, b) => Number(a) - Number(b));
-  const usedDigits = new Set(clockSlots.filter(Boolean));
-  const showDigits = clockMemorizing || clockRotating || clockReading;
-  const targetTime = ROUND_TIMES[clockRound - 1];
-  const displayedTime = clockRound === 1 ? targetTime : (selectedTime || "12:00");
-  const [displayHour, displayMinute] = displayedTime.split(":").map(Number);
-
-  // Wskazówka minutowa: 6° na minutę.
-  // Godzinowa: 30° na godzinę plus 0,5° za każdą minutę.
-  // Dodatkowe obroty zachowują animację mechanizmu.
-  const minuteAngle = displayMinute * 6 + handSpins * 360 * 12;
-  const hourAngle =
-    (displayHour % 12) * 30 + displayMinute * 0.5 + handSpins * 360;
-  const handTransition = `transform ${ROTATE_MS}ms ease-in-out, opacity 0.4s`;
-  const handOpacity =
-    clockRound === 1
-      ? (clockRotating || clockReading ? 1 : 0.15)
-      : (clockReading && selectedTime ? 1 : 0.15);
 
   return (
     <main className="game-shell">
-      <button
-        type="button"
-        className="text-button"
-        onClick={() => setVoiceEnabled((enabled) => !enabled)}
-        aria-label={voiceEnabled ? "Wyłącz głos" : "Włącz głos"}
-        aria-pressed={voiceEnabled}
-        style={{
-          position: "absolute",
-          top: 12,
-          right: 16,
-          zIndex: 20,
-        }}
-      >
-        {voiceEnabled ? "🔇 WYŁĄCZ GŁOS" : "🔊 WŁĄCZ GŁOS"}
-      </button>
-
       <MatrixRain speed={screen === "level1" ? 1.7 : 0.7} />
 
       <header className="game-header">
         <div className="brand">
-          <span className="brand-mark">⌘</span>
-          <span>ESCAPE<span className="accent">ROOM</span></span>
+          <span className="brand-mark"><LocalizedText translationKey="copy.1d4075e7" fallback={"⌘"} /></span>
+          <span><LocalizedText translationKey="copy.a1be99c2" fallback={"LABORATORIUM "} /><span className="accent"><LocalizedText translationKey="copy.39dcb3b2" fallback={"PROFESORA"} /></span></span>
         </div>
-        <div className="system-status">
-          <span className="status-dot" />
-          SYSTEM ONLINE
+        <div className="header-controls">
+          <div className="system-status">
+            <span className="status-dot" />
+            <LocalizedText translationKey="copy.f3f911dd" fallback={"SYSTEM ONLINE "} /></div>
+          <button
+            aria-label={language === "pl" ? "Switch language to English" : "Zmień język na polski"}
+            className="language-toggle"
+            onClick={() => setLanguage(language === "pl" ? "en" : "pl")}
+            type="button"
+          >
+            {language === "pl" ? "EN" : "PL"}
+          </button>
+          <span className="account-email" title={userEmail}>{userEmail}</span>
+          {screen !== "lobby" && (
+            <button
+              className="room-map-toggle"
+              onClick={() => {
+                setRoomMapOpen(false);
+                setScreen("lobby");
+              }}
+              type="button"
+            >
+              <LocalizedText translationKey="copy.2d6aef44" fallback={"WYBÓR GRY "} /></button>
+          )}
+          {screen !== "lobby" && (
+            <button
+              aria-haspopup="dialog"
+              className="room-map-toggle"
+              onClick={() => setRoomMapOpen(true)}
+              type="button"
+            >
+              <LocalizedText translationKey="copy.daebca4c" fallback={"⌖ MAPA POKOI "} /></button>
+          )}
+          <button
+            type="button"
+            className="voice-toggle"
+            onClick={() => setVoiceEnabled((enabled) => !enabled)}
+            aria-label={voiceEnabled ? "Wyłącz głos" : "Włącz głos"}
+            aria-pressed={voiceEnabled}
+          >
+            {voiceEnabled ? <LocalizedText translationKey="copy.22902847" fallback={"🔇 WYŁĄCZ GŁOS"} /> : <LocalizedText translationKey="copy.dc79d50b" fallback={"🔊 WŁĄCZ GŁOS"} />}
+          </button>
+          <button className="room-map-toggle" onClick={() => void logout()} type="button">
+            <LocalizedText translationKey="copy.8ff21c7e" fallback={"WYLOGUJ "} /></button>
         </div>
       </header>
 
-      {screen === "intro" && (
-        <section className="screen intro-screen">
-          <div className="eyebrow">SYSTEM ZAGADEK // 001</div>
+      {roomMapOpen && (
+        <RoomMapModal
+          currentRoomNumber={currentRoomNumber}
+          onClose={() => setRoomMapOpen(false)}
+        />
+      )}
+
+      {(authNotice || translationError) && (
+        <p className="auth-global-message" role="alert">
+          {authNotice || `Nie udało się pobrać tekstów z bazy: ${translationError}`}
+        </p>
+      )}
+
+      {screen === "lobby" && (
+        <section className="screen lobby-screen">
+          <div className="eyebrow"><LocalizedText translationKey="copy.d73d6f32" fallback={"PANEL WYBORU ESCAPE ROOMU"} /></div>
           <h1>
-            KAŻDY KOD
-            <br />
-            <span className="accent">MA SWOJĄ TAJEMNICĘ.</span>
+            <LocalizedText translationKey="copy.a1be99c2" fallback={"LABORATORIUM "} /><br />
+            <span className="accent"><LocalizedText translationKey="copy.39dcb3b2" fallback={"PROFESORA"} /></span>
           </h1>
           <p className="lead">
-            Jesteś zamknięty w systemie. Odszyfruj wiadomość, znajdź wyjście
-            i odkryj, co czeka za kolejnymi drzwiami.
-          </p>
+            <LocalizedText translationKey="copy.cbaecf20" fallback={"Witaj, "} />{userEmail}<LocalizedText translationKey="copy.a923e98b" fallback={". Wybierz archiwum i rozpocznij swoją wyprawę. "} /></p>
+          <article className="escape-room-card">
+            <div className="escape-room-art" aria-hidden="true">
+              <span><LocalizedText translationKey="copy.ac0d6404" fallback={"Ω"} /></span>
+              <i />
+            </div>
+            <div className="escape-room-copy">
+              <div className="eyebrow"><LocalizedText translationKey="copy.6dd77941" fallback={"DOSTĘPNE ESCAPE ROOMY · 01"} /></div>
+              <h2><LocalizedText translationKey="copy.2963a16c" fallback={"Labirynt 99 Pokoi"} /></h2>
+              <p>
+                <LocalizedText translationKey="copy.4dc6b83f" fallback={"Wejdź do umysłu profesora Henry'ego Armitage'a. Odzyskuj wspomnienia, rozwiązuj zagadki i dotrzyj do Punktu Omega. "} /></p>
+              <div className="escape-room-meta">
+                <span>{ACTIVE_LEVEL_COUNT} <LocalizedText translationKey="copy.d77a511f" fallback={"AKTYWNYCH MISJI"} /></span>
+                <span><LocalizedText translationKey="copy.b8cbf324" fallback={"JĄDRO ŚWIADOMOŚCI"} /></span>
+              </div>
+              <button
+                className="primary-button"
+                onClick={() => setScreen("intro")}
+                type="button"
+              >
+                <LocalizedText translationKey="copy.66e56804" fallback={"WYBIERZ LABIRYNT "} /><span><LocalizedText translationKey="copy.973c7cf5" fallback={"→"} /></span>
+              </button>
+            </div>
+          </article>
+        </section>
+      )}
+
+      {screen === "intro" && (
+        <section className="screen intro-screen">
+          <div className="eyebrow">
+            <LocalizedText translationKey="copy.cd80da87" fallback={"SYSTEM ZAGADEK // 001 / "} />{ACTIVE_LEVEL_COUNT}{" "}
+            {activeMissionLabel.toLocaleUpperCase("pl-PL")}
+          </div>
+          <h1>
+            <LocalizedText translationKey="copy.79decb85" fallback={"KAŻDY KOD "} /><br />
+            <span className="accent"><LocalizedText translationKey="copy.2fe1ead1" fallback={"MA SWOJĄ TAJEMNICĘ."} /></span>
+          </h1>
+          <p className="lead">
+            <LocalizedText translationKey="copy.d0d9e2bc" fallback={"Jesteś zamknięty w systemie. Odszyfruj wiadomość, znajdź wyjście i odkryj, co czeka za kolejnymi drzwiami. "} /></p>
 
           <div className="intro-story">
             <p>
-              <strong>ARCHIWUM 099 // WIADOMOŚĆ ODEBRANA</strong>
+              <strong>
+                <LocalizedText translationKey="copy.3affcfd5" fallback={"ARCHIWUM "} />{ACTIVE_LEVEL_COUNT} <LocalizedText translationKey="copy.8492a839" fallback={"// WIADOMOŚĆ ODEBRANA "} /></strong>
             </p>
             <p>
-              Witaj, uczestniku. Jeśli słyszysz ten komunikat, procedura
-              rejestracji dobiegła końca. System przyjął twoje zgłoszenie
-              i przyznał ci dostęp do archiwum, którego dokumentacja od lat
-              pozostaje niekompletna.
-            </p>
+              <LocalizedText translationKey="copy.86a5a793" fallback={"Witaj, naprawczy impulsie. Jesteś wewnątrz Labiryntu 99 Pokoi — archiwum pamięci stworzonego przez profesora Henry'ego Armitage'a. Zachowane zapisy są niekompletne, a połączenia między nimi zaczynają zanikać. "} /></p>
             <p>
-              Nie wiadomo, kto stworzył ten eksperyment ani dlaczego
-              poszczególne pomieszczenia zostały zamknięte. W zachowanych
-              zapisach pojawiają się zaszyfrowane wiadomości, tajemnicze
-              przedmioty i notatki podpisane imieniem Henryk.
-            </p>
+              <LocalizedText translationKey="copy.2c30f5c0" fallback={"Wraz ze swoim zespołem przywracaj sygnały i łącz ślady z różnych stref. Każdy pokój przechowuje fragment życia, pracy lub wspomnień Profesora — nie traktuj ich jak błędów do wymazania. "} /></p>
             <p>
-              Przed tobą dziewięćdziesiąt dziewięć poziomów. Każdy skrywa
-              fragment większej historii. Obserwuj otoczenie, łącz fakty
-              i nie odrzucaj szczegółów tylko dlatego, że na pierwszy rzut
-              oka wydają się nieistotne.
-            </p>
+              <LocalizedText translationKey="copy.408b526a" fallback={"Przed tobą "} /><strong>{activeLevelDescription}</strong><LocalizedText translationKey="copy.f2792005" fallback={". To odzyskane węzły większej mapy; niektóre sektory łączą skróty synaptyczne. Ostateczny cel znajduje się w Pokoju 99: zabezpieczyć ukryte badania i zdecydować, jak uszanować prywatność ich autora. "} /></p>
             <p>
-              System może pokazać ci drogę, ale nie rozwiąże zagadek za
-              ciebie. Czasem odpowiedź będzie oczywista. Czasem będziesz
-              musiał wrócić do wcześniejszego odkrycia i spojrzeć na nie
-              zupełnie inaczej.
-            </p>
+              <LocalizedText translationKey="copy.dee4a42e" fallback={"Choroba nie jest przeciwnikiem tej historii. Liczą się uważność, współpraca i empatia — wobec siebie nawzajem oraz wobec człowieka, którego ślady odtwarzacie. "} /></p>
             <p>
-              W zachowanym pliku znaleziono ostatnią wiadomość od
-              nieznanego nadawcy:
-              <strong> „Nie ufaj pierwszej odpowiedzi”.</strong>
+              <LocalizedText translationKey="copy.aa1e5071" fallback={"W ostatnim zachowanym pliku Profesor zapisał: "} /><strong> <LocalizedText translationKey="copy.7b38861b" fallback={"„Nie ufaj pierwszej odpowiedzi”."} /></strong>
             </p>
           </div>
 
-          <div className="mission-card">
-            <div className="mission-number">01</div>
-            <div>
-              <div className="eyebrow">PIERWSZA MISJA</div>
-              <h2>Rozpoczynamy misję</h2>
-              <p>Odszyfruj wiadomość zapisaną w kodzie binarnym.</p>
-            </div>
-            <span className="mission-lock">🔓</span>
+          <div className="active-level-counter" aria-live="polite">
+            <span><LocalizedText translationKey="copy.dde775c1" fallback={"AKTYWNE POZIOMY"} /></span>
+            <strong>{ACTIVE_LEVEL_COUNT}</strong>
+            <span><LocalizedText translationKey="copy.801abc60" fallback={"W REJESTRZE KAMPANII"} /></span>
           </div>
+
+          {firstEnabledLevel ? (
+            <div className="mission-card">
+              <div className="mission-number">
+                {String(firstEnabledLevel.number).padStart(2, "0")}
+              </div>
+              <div>
+                <div className="eyebrow"><LocalizedText translationKey="copy.7619e99b" fallback={"PIERWSZA DOSTĘPNA MISJA"} /></div>
+                <h2><LocalizedText fallback={firstEnabledLevel.title} /></h2>
+                <p><LocalizedText fallback={firstEnabledLevel.description} /></p>
+              </div>
+              <span className="mission-lock"><LocalizedText translationKey="copy.de2d29a1" fallback={"🔓"} /></span>
+            </div>
+          ) : (
+            <p className="feedback" role="status">
+              <LocalizedText translationKey="copy.f6346058" fallback={"Brak aktywnych poziomów. Włącz przynajmniej jeden poziom w rejestrze. "} /></p>
+          )}
 
           <button
             className="primary-button"
-            onClick={warmBackendAndStart}
-            disabled={backendWarming}
+            onClick={startFirstEnabledLevel}
+            disabled={backendWarming || !firstEnabledLevel}
           >
-            {backendWarming ? "URUCHAMIAM SYSTEM..." : "ROZPOCZNIJ MISJĘ"}
-            {!backendWarming && <span> →</span>}
+            {backendWarming ? <LocalizedText translationKey="copy.2903c9fc" fallback={"URUCHAMIAM SYSTEM..."} /> : <LocalizedText translationKey="copy.2a049ae0" fallback={"ROZPOCZNIJ MISJĘ"} />}
+            {!backendWarming && <span> <LocalizedText translationKey="copy.973c7cf5" fallback={"→"} /></span>}
           </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={!voiceEnabled}
+            onClick={() =>
+              playPolishAudio(archiveIntroNarrationFiles(ACTIVE_LEVEL_COUNT))
+            }
+          >
+            <LocalizedText translationKey="copy.c3cb90fa" fallback={"▶ ODTWÓRZ LEKTORA "} /></button>
           <p className="small-note" role="status" aria-live="polite">
-            {backendMessage || "MISJA 01 // SZYFR BINARNY"}
+            {backendMessage ||
+              (firstEnabledLevel
+                ? localizeAttribute("copy.8315ef2a", "MISJA {number} // {title}", {
+                    number: String(firstEnabledLevel.number).padStart(2, "0"),
+                    title: localizeAttribute(
+                      translationKeyFor(firstEnabledLevel.title),
+                      firstEnabledLevel.title,
+                    ).toLocaleUpperCase(language === "pl" ? "pl-PL" : "en-US"),
+                  })
+                : localizeAttribute("copy.7921e115", "BRAK AKTYWNYCH MISJI"))}
           </p>
         </section>
       )}
 
       {screen === "level1" && (
-        <section className="screen">
-          <div className="eyebrow">MISJA 01 / SZYFR BINARNY</div>
-          <h1 className="section-title">
-            ODSZYFRUJ <span className="accent">WIADOMOŚĆ</span>
-          </h1>
-          <p className="lead">
-            Każda litera ma swój kod. Odkryj hasło, które otworzy pierwsze
-            drzwi.
-          </p>
+        <Room01 onComplete={() => continueAfterLevel("room01")} />
+      )}
 
-          <div className="stats-grid">
-            <div className="stat-card">
-              <span>CZAS</span>
-              <strong>{formatTime(level1Seconds)}</strong>
-            </div>
-            <div className="stat-card">
-              <span>POSTĘP</span>
-              <strong>{progress}/{PASSWORD.length}</strong>
-            </div>
-            <div className="stat-card">
-              <span>PRÓBY</span>
-              <strong>{attempts}</strong>
-            </div>
-            <div className="stat-card">
-              <span>BŁĘDY</span>
-              <strong>{errors}</strong>
-            </div>
-          </div>
+      {screen === "room05" && (
+        <Room05 onComplete={() => continueAfterLevel("room05")} />
+      )}
 
-          <div className="progress-track">
-            <div
-              className="progress-fill"
-              style={{ width: `${(progress / PASSWORD.length) * 100}%` }}
-            />
-          </div>
+      {screen === "room11" && (
+        <Room11 onComplete={() => continueAfterLevel("room11")} />
+      )}
 
-          <div className="terminal-panel">
-            <div className="terminal-heading">
-              <span>TERMINAL ODSZYFROWUJĄCY</span>
-              <span className="live-label">● LIVE</span>
-            </div>
-            <div className="binary-display">
-              {Array.from({ length: 5 }, (_, index) => (
-                <span key={index}>
-                  {((index + progress) % 2).toString()}
-                </span>
-              ))}
-            </div>
-            <div className="terminal-hint">
-              Wprowadź hasło lub jego kolejną część.
-            </div>
+      {screen === "room12" && (
+        <Room12 onComplete={() => continueAfterLevel("room12")} />
+      )}
 
-            <form className="guess-form" onSubmit={submitGuess}>
-              <input
-                value={guess}
-                onChange={(event) => setGuess(event.target.value)}
-                placeholder="Wpisz odszyfrowane hasło..."
-                autoComplete="off"
-                disabled={progress >= PASSWORD.length}
-              />
-              <button type="submit" disabled={!guess.trim()}>
-                SPRAWDŹ
-              </button>
-            </form>
-            <p className="feedback" role="status">{feedback}</p>
-          </div>
+      {screen === "room17" && (
+        <Room17
+          onComplete={() => continueAfterLevel("room17")}
+          voiceEnabled={voiceEnabled}
+        />
+      )}
 
-          <div className="decoded-panel">
-            <div className="decoded-heading">
-              <div>
-                <div className="eyebrow">ODKRYTE ZNAKI</div>
-                <h2>Ślady szyfru</h2>
-              </div>
-              <button
-                className="secondary-button"
-                onClick={() => setAllFlipped((previous) => !previous)}
-              >
-                {allFlipped ? "UKRYJ LITERY" : "ODWRÓĆ WSZYSTKIE"}
-              </button>
-            </div>
+      {screen === "room22" && (
+        <Room22 onComplete={() => continueAfterLevel("room22")} />
+      )}
 
-            <div className="flip-grid">
-              {decoded.map((character, index) => (
-                <button
-                  key={`${index}-${character}`}
-                  className={`flip-card ${allFlipped ? "is-flipped" : ""}`}
-                  onClick={(event) =>
-                    event.currentTarget.classList.toggle("is-flipped")
-                  }
-                  title="Kliknij, aby odwrócić kartę"
-                >
-                  <span className="flip-inner">
-                    <span className="flip-front">
-                      {(character.toUpperCase().charCodeAt(0) - 65).toString(2).padStart(5, "0")}
-                    </span>
-                    <span className="flip-back">
-                      {character === " " ? "␣" : character.toUpperCase()}
-                    </span>
-                  </span>
-                </button>
-              ))}
-              {decoded.length === 0 && (
-                <p className="empty-state">
-                  Odkryte litery pojawią się tutaj.
-                </p>
-              )}
-            </div>
-          </div>
-        </section>
+      {screen === "room23" && (
+        <Room23 onComplete={() => continueAfterLevel("room23")} />
+      )}
+
+      {screen === "room27" && (
+        <Room27 onComplete={() => continueAfterLevel("room27")} />
+      )}
+
+      {screen === "room33" && (
+        <Room33 onComplete={() => continueAfterLevel("room33")} />
+      )}
+
+      {screen === "room40" && (
+        <Room40 onComplete={() => continueAfterLevel("room40")} />
+      )}
+
+      {screen === "room44" && (
+        <Room44 onComplete={() => continueAfterLevel("room44")} />
+      )}
+
+      {screen === "room45" && (
+        <Room45 onComplete={() => continueAfterLevel("room45")} />
+      )}
+
+      {screen === "room50" && (
+        <Room50 onComplete={() => continueAfterLevel("room50")} />
+      )}
+
+      {screen === "room55" && (
+        <Room55 onComplete={() => continueAfterLevel("room55")} />
+      )}
+
+      {screen === "room61" && (
+        <Room61 onComplete={() => continueAfterLevel("room61")} />
+      )}
+
+      {screen === "room66" && (
+        <Room66 onComplete={continueAfterEthicalChoice} />
+      )}
+
+      {screen === "room76" && (
+        <Room76 onComplete={() => continueAfterLevel("room76")} />
+      )}
+
+      {screen === "room72" && (
+        <Room72 onComplete={() => continueAfterLevel("room72")} />
+      )}
+
+      {screen === "room77" && (
+        <Room77 onComplete={() => continueAfterLevel("room77")} />
+      )}
+
+      {screen === "room67" && (
+        <Room67 onComplete={() => continueAfterLevel("room67")} />
+      )}
+
+      {screen === "room78" && (
+        <Room78 onComplete={() => continueAfterLevel("room78")} />
+      )}
+
+      {screen === "room83" && (
+        <Room83 onComplete={() => continueAfterLevel("room83")} />
+      )}
+
+      {screen === "room88" && (
+        <Room88 onComplete={() => continueAfterLevel("room88")} />
+      )}
+
+      {screen === "room89" && (
+        <Room89 onComplete={() => continueAfterLevel("room89")} />
+      )}
+
+      {screen === "room99" && (
+        <Room99
+          onComplete={(choice) => {
+            setFinalDecision(choice);
+            continueAfterLevel("room99");
+          }}
+        />
       )}
 
       {screen === "transition" && (
         <section className="screen story-screen">
-          <div className="success-icon">✓</div>
-          <div className="eyebrow">MISJA 01 // ZAKOŃCZONA</div>
+          <div className="success-icon"><LocalizedText translationKey="copy.163a1ee2" fallback={"✓"} /></div>
+          <div className="eyebrow">
+            <LocalizedText translationKey="copy.b843a487" fallback={"MISJA "} />{String(LEVELS.find((level) => level.id === completedLevelId)?.number ?? 0).padStart(2, "0")} <LocalizedText translationKey="copy.ed49ce86" fallback={"// ZAKOŃCZONA "} /></div>
           <h1>
-            PIERWSZE DRZWI
+            {nextEnabledLevel ? <LocalizedText translationKey="copy.d2ea6b3b" fallback={"KOLEJNE DRZWI"} /> : <LocalizedText translationKey="copy.a350ce15" fallback={"KAMPANIA"} />}
             <br />
-            <span className="accent">SĄ OTWARTE.</span>
+            <span className="accent">{nextEnabledLevel ? <LocalizedText translationKey="copy.42be077c" fallback={"SĄ OTWARTE."} /> : <LocalizedText translationKey="copy.4e930fc8" fallback={"ZAKOŃCZONA."} />}</span>
           </h1>
           <p className="story-quote">
-            „Próbował to zrobić setki razy. Ani razu mu się nie udało.”
+            {nextEnabledLevel
+              ? <LocalizedText translationKey="copy.0dc5f01b" fallback={"Impuls odnajduje połączenie. Przed tobą kolejny odzyskany węzeł."} />
+              : completedLevelId === "room99" && finalDecision === "privacy"
+                ? <LocalizedText translationKey="copy.57051d54" fallback={"Archiwum osobistych wspomnień Henry'ego zostało zamknięte. Pozostał anonimowy ślad jego badań."} />
+                : completedLevelId === "room99" && finalDecision === "research"
+                  ? <LocalizedText translationKey="copy.a749f36c" fallback={"Pełne badania Henry'ego zostały zabezpieczone. Ich przyszłość będzie wymagała odpowiedzialności."} />
+                  : <LocalizedText translationKey="copy.4fa32bfb" fallback={"Przywróciłeś wszystkie dostępne połączenia archiwum."} />}
           </p>
-          <p className="lead">
-            Przechodzisz do kolejnego pomieszczenia. Widzisz stare biurko,
-            rozsypane zębatki i kartkę pokrytą rysunkami zegara. Na marginesie
-            ktoś napisał:
-          </p>
-          <blockquote>
-            „Głowa już nie wie, która godzina. Dzieci myślą, że zwariowałem...
-            Ale w tym zegarze naprawdę jest klucz.”
-          </blockquote>
-
-          <div className="mission-card unlocked">
-            <div className="mission-number">02</div>
-            <div>
-              <div className="eyebrow">NOWA MISJA ODBLOKOWANA</div>
-              <h2>Zegar Henryka</h2>
-              <p>Masz pięć minut. Ułóż zegar i otwórz drzwi.</p>
-            </div>
-            <span className="mission-lock">🔓</span>
-          </div>
-
-          <button className="primary-button" onClick={startLevel2}>
-            PRZEJDŹ DO LEVELU 2 <span>→</span>
-          </button>
-          <button className="text-button" onClick={startLevel1}>
-            ↻ Powtórz pierwszą misję
-          </button>
+          {nextEnabledLevel && (
+            <>
+              <p className="lead">
+                {completedLevelId === "room66" && ethicalChoice === "privacy"
+                  ? <LocalizedText translationKey="copy.94e709fa" fallback={"Wybrano ochronę prywatności. Osobiste zapisy pozostają zamknięte; w Pokoju 76 pracujecie wyłącznie na anonimowych znaczeniach."} />
+                  : completedLevelId === "room66" && ethicalChoice === "research"
+                    ? <LocalizedText translationKey="copy.439eda3a" fallback={"Wybrano zachowanie badań z ograniczonym dostępem i udokumentowaną zgodą. W Pokoju 76 archiwum przechodzi do odzyskiwania znaczeń."} />
+                    : ROOM_TRANSITIONS[completedLevelId]?.[nextEnabledLevel.id] ??
+                      <LocalizedText translationKey="copy.0f89a2c9" fallback={"Przed tobą kolejny odzyskany węzeł archiwum."} />}
+              </p>
+              <div className="mission-card unlocked">
+                <div className="mission-number">
+                  {String(nextEnabledLevel.number).padStart(2, "0")}
+                </div>
+                <div>
+                  <div className="eyebrow"><LocalizedText translationKey="copy.6afa9d24" fallback={"NASTĘPNA MISJA"} /></div>
+                  <h2><LocalizedText fallback={nextEnabledLevel.title} /></h2>
+                  <p><LocalizedText fallback={nextEnabledLevel.description} /></p>
+                </div>
+                <span className="mission-lock"><LocalizedText translationKey="copy.de2d29a1" fallback={"🔓"} /></span>
+              </div>
+              <button className="primary-button" onClick={startNextEnabledLevel}>
+                <LocalizedText translationKey="copy.c4f27c1b" fallback={"PRZEJDŹ DO LEVELU "} />{nextEnabledLevel.number} <span><LocalizedText translationKey="copy.973c7cf5" fallback={"→"} /></span>
+              </button>
+            </>
+          )}
+          {!nextEnabledLevel && (
+            <>
+              {completedLevelId === "room99" && (
+                <p className="lead">
+                  <LocalizedText translationKey="copy.72548b71" fallback={"Labirynt 99 Pokoi dobiegł końca. Wasza decyzja pozostaje częścią zakończenia — żadna z dróg nie jest oceniana jako błędna. "} /></p>
+              )}
+              <button className="primary-button" onClick={() => setScreen("intro")}>
+                <LocalizedText translationKey="copy.0e2c2227" fallback={"WRÓĆ DO MENU "} /><span><LocalizedText translationKey="copy.973c7cf5" fallback={"→"} /></span>
+              </button>
+            </>
+          )}
+          {isLevelEnabled(completedLevelId) && (
+            <button
+              className="text-button"
+              onClick={() => startLevelById(completedLevelId)}
+            >
+              <LocalizedText translationKey="copy.600e19f5" fallback={"↻ Powtórz Level "} />{LEVELS.find((level) => level.id === completedLevelId)?.number}
+            </button>
+          )}
         </section>
       )}
 
       {screen === "level2intro" && (
         <section className="screen story-screen">
           <ClockMemoryBackdrop mode="cycle" />
-          <div className="eyebrow">MISJA 02 / ZAGINIONY CZAS</div>
+          <div className="eyebrow"><LocalizedText translationKey="copy.fc037441" fallback={"POKÓJ 34 / HIPOKAMP"} /></div>
           <h1>
-            ZEGAR
-            <br />
-            <span className="accent">HENRYKA</span>
+            <LocalizedText translationKey="copy.8dac9ea8" fallback={"ZATRZYMANA "} /><br />
+            <span className="accent"><LocalizedText translationKey="copy.b6675d7d" fallback={"WSKAZÓWKA"} /></span>
           </h1>
 
           <p className="story-quote">
-            „Próbował to zrobić setki razy. Ani razu mu się nie udało.”
-          </p>
+            <LocalizedText translationKey="copy.8b9d56c4" fallback={"„Jeśli układ się rozsypie, zacznij od jednej chwili.” "} /></p>
+
+          <div
+            className="mission-art clock-mission-art"
+            role="img"
+            aria-label={localizeAttribute("copy.2f46318a", "Animowana tarcza starego zegara z poruszającymi się wskazówkami i cyframi.")}
+          >
+            <div className="mission-art-heading">
+              <span className="logic-led is-on" />
+              <LocalizedText translationKey="copy.d81bcd1d" fallback={"POKÓJ 34 // REKONSTRUKCJA ZEGARA "} /></div>
+            <div className="clock-art-face" aria-hidden="true">
+              {Array.from({ length: 12 }, (_, index) => {
+                const angle = index * 30;
+                const radius = 76;
+                const x = 50 + Math.sin((angle * Math.PI) / 180) * radius;
+                const y = 50 - Math.cos((angle * Math.PI) / 180) * radius;
+                return (
+                  <span
+                    className="clock-art-number"
+                    key={index}
+                    style={{ left: `${x}%`, top: `${y}%` }}
+                  >
+                    {index === 0 ? 12 : index}
+                  </span>
+                );
+              })}
+              <span className="clock-art-hand clock-art-hour" />
+              <span className="clock-art-hand clock-art-minute" />
+              <span className="clock-art-pivot" />
+            </div>
+            <div className="mission-art-footer">
+              <span><LocalizedText translationKey="copy.ce7a017f" fallback={"WSKAZÓWKI: 2"} /></span>
+              <span><LocalizedText translationKey="copy.1997a37f" fallback={"MECHANIZM: NIESTABILNY"} /></span>
+              <span><LocalizedText translationKey="copy.0db5f608" fallback={"STATUS: ZATRZYMANY"} /></span>
+            </div>
+          </div>
 
           <div className="story-body">
             <p>
-              Pan Henryk przez całe życie był zegarmistrzem. Kiedy zaczęła się
-              choroba, czas stał się jego największym wrogiem.
-            </p>
+              <LocalizedText translationKey="copy.1bffbdb6" fallback={"Pokój 34 należy do sektora hipokampa — strefy zapisu czasu i wspomnień. W archiwum zachował się warsztat Profesora Henry'ego Armitage'a i niedokończona rekonstrukcja jego zegara. "} /></p>
             <p>
-              Siedział przy tym biurku całymi dniami, próbując ułożyć prostą
-              tarczę z cyfr. Myśli jednak ciągle mu uciekały – mylił
-              <strong> 12 z 6</strong>, a wskazówki rysował po drugiej stronie
-              pętli.
-            </p>
+              <LocalizedText translationKey="copy.1f4e2150" fallback={"Układ cyfr i godzin jest niepełny. Odtwórz go z zachowanych elementów, a następnie odczytaj wskazówki. To zapis do zrekonstruowania, nie test ani ocena pamięci Profesora. "} /></p>
             <p>
-              Na marginesie ostatniej kartki napisał drżącą ręką:
-            </p>
+              <LocalizedText translationKey="copy.8883960a" fallback={"Na marginesie zachowanej notatki widnieje zdanie: "} /></p>
             <blockquote>
-              „Głowa już nie wie, która godzina. Dzieci myślą, że zwariowałem...
-              Ale w tym zegarze naprawdę jest klucz.”
-            </blockquote>
+              <LocalizedText translationKey="copy.cbc19ca3" fallback={"„Jeśli układ się rozsypie, zacznij od jednej chwili. Potem odnajdź następną.” "} /></blockquote>
             <p>
-              Drzwi do jego pracowni zatrzaskują się. Masz <strong>5 minut</strong>,
-              zanim stary zamek automatyczny zatrzaśnie się na stałe.
-            </p>
+              <LocalizedText translationKey="copy.bf68f39a" fallback={"Zapis zaczyna zanikać. Masz "} /><strong><LocalizedText translationKey="copy.c51ed01d" fallback={"5 minut"} /></strong><LocalizedText translationKey="copy.e52534ac" fallback={", by odtworzyć go i otworzyć skrót synaptyczny. "} /></p>
             <p>
-              Spójrz na rozsypane zębatki jego oczami, zrozum błędne notatki,
-              które po sobie zostawił, i ułóż zegar tak, jak on desperacko
-              próbował go zobaczyć.
-            </p>
+              <LocalizedText translationKey="copy.a55ba6c8" fallback={"Znajdź części zegara, ułóż kolejne układy cyfr i przejdź dalej, gdy wskazówki pokażą właściwe godziny. "} /></p>
           </div>
 
           <div className="warning-box">
-            <span>⏱</span>
+            <span><LocalizedText translationKey="copy.743f6bdc" fallback={"⏱"} /></span>
             <div>
-              <strong>LIMIT CZASU: 05:00</strong>
-              <p>Po rozpoczęciu misji zegar nie zatrzyma się.</p>
+              <strong><LocalizedText translationKey="copy.f0468f11" fallback={"LIMIT CZASU: 05:00"} /></strong>
+              <p><LocalizedText translationKey="copy.884a0be9" fallback={"Po rozpoczęciu misji zegar nie zatrzyma się."} /></p>
             </div>
           </div>
 
           <button className="primary-button" onClick={beginClockMission}>
-            ZROZUM I ZŁÓŻ ZEGAR <span>→</span>
+            <LocalizedText translationKey="copy.9b39ccf3" fallback={"ZROZUM I ZŁÓŻ ZEGAR "} /><span><LocalizedText translationKey="copy.973c7cf5" fallback={"→"} /></span>
           </button>
         </section>
       )}
 
       {screen === "level2" && (
         <section className="screen level2-screen">
-          <div className="eyebrow">MISJA 02 / ZEGAR HENRYKA</div>
+          <div className="eyebrow"><LocalizedText translationKey="copy.fc037441" fallback={"POKÓJ 34 / HIPOKAMP"} /></div>
           <div className="level2-title-row">
             <h1 className="section-title">
-              OSTATNIE <span className="accent">5 MINUT</span>
+              <LocalizedText translationKey="copy.2eb2f71c" fallback={"ZAPIS "} /><span className="accent"><LocalizedText translationKey="copy.eac5a497" fallback={"CZASU"} /></span>
             </h1>
             <div className={`countdown ${secondsLeft <= 60 ? "danger" : ""}`}>
-              ⏱ {formatTime(secondsLeft)}
+              <LocalizedText translationKey="copy.fbd6fdb4" fallback={"⏱ "} />{formatTime(secondsLeft)}
             </div>
           </div>
 
           <p className="lead">
-            Przeszukaj pracownię. Znajdź cztery cyfry i wskazówki, a następnie
-            odtwórz zegar z rysunku Henryka.
-          </p>
+            <LocalizedText translationKey="copy.9bbcbfbd" fallback={"Przeszukaj zapisany warsztat. Znajdź cyfry i wskazówki, a następnie odtwórz kolejne układy zegara. "} /></p>
 
           <div className="stats-grid">
             <div className="stat-card">
-              <span>ELEMENTY</span>
-              <strong>{found.length}/6</strong>
+              <span><LocalizedText translationKey="copy.14175bca" fallback={"ELEMENTY"} /></span>
+              <strong>{found.length}<LocalizedText translationKey="copy.99d258b8" fallback={"/6"} /></strong>
             </div>
             <div className="stat-card">
-              <span>PRÓBY ZEGARA</span>
+              <span><LocalizedText translationKey="copy.8905a3bb" fallback={"PRÓBY ZEGARA"} /></span>
               <strong>{level2Attempts}</strong>
             </div>
             <div className="stat-card">
-              <span>RUNDY</span>
-              <strong>{clockRoundsCompleted}/{TOTAL_ROUNDS}</strong>
+              <span><LocalizedText translationKey="copy.63641a89" fallback={"RUNDY"} /></span>
+              <strong>{clockRoundsCompleted}<LocalizedText translationKey="copy.2a0c975e" fallback={"/"} />{TOTAL_ROUNDS}</strong>
             </div>
           </div>
 
           <div className="workshop">
-            <div className="workshop-label">PRACOWNIA HENRYKA // ROZEJRZYJ SIĘ</div>
+            <div className="workshop-label"><LocalizedText translationKey="copy.d2b5712b" fallback={"POKÓJ 34 // ODNAJDŹ FRAGMENTY ZAPISU"} /></div>
             <div className="room-scene">
-              <div className="room-window">🌙</div>
-              <div className="room-shelf">📚　🕰️　📚</div>
+              <div className="room-window"><LocalizedText translationKey="copy.d82f5ec6" fallback={"🌙"} /></div>
+              <div className="room-shelf"><LocalizedText translationKey="copy.0fdb08cf" fallback={"📚 🕰️ 📚"} /></div>
               <button
                 className={`room-object paper-object ${found.includes("note") ? "collected" : ""}`}
                 onClick={() => collectItem(ITEMS[0])}
-                aria-label="Znajdź notatkę"
+                aria-label={localizeAttribute("copy.73e1a258", "Znajdź notatkę")}
               >
-                📜
-                <small>{found.includes("note") ? "ZNALEZIONO" : "NOTATKA"}</small>
+                <LocalizedText translationKey="copy.fb206534" fallback={"📜 "} /><small>{found.includes("note") ? <LocalizedText translationKey="copy.1a929848" fallback={"ZNALEZIONO"} /> : <LocalizedText translationKey="copy.4df01f67" fallback={"NOTATKA"} />}</small>
               </button>
               <button
                 className={`room-object number-object object-12 ${found.includes("number12") ? "collected" : ""}`}
                 onClick={() => collectItem(ITEMS[1])}
               >
-                12
-                <small>{found.includes("number12") ? "✓" : "CYFRA"}</small>
+                <LocalizedText translationKey="copy.63384b7e" fallback={"12 "} /><small>{found.includes("number12") ? "✓" : <LocalizedText translationKey="copy.4ff4c70c" fallback={"CYFRA"} />}</small>
               </button>
               <button
                 className={`room-object number-object object-3 ${found.includes("number3") ? "collected" : ""}`}
                 onClick={() => collectItem(ITEMS[2])}
               >
-                3
-                <small>{found.includes("number3") ? "✓" : "CYFRA"}</small>
+                <LocalizedText translationKey="copy.77f03846" fallback={"3 "} /><small>{found.includes("number3") ? "✓" : <LocalizedText translationKey="copy.4ff4c70c" fallback={"CYFRA"} />}</small>
               </button>
               <button
                 className={`room-object number-object object-6 ${found.includes("number6") ? "collected" : ""}`}
                 onClick={() => collectItem(ITEMS[3])}
               >
-                6
-                <small>{found.includes("number6") ? "✓" : "CYFRA"}</small>
+                <LocalizedText translationKey="copy.05e8c90b" fallback={"6 "} /><small>{found.includes("number6") ? "✓" : <LocalizedText translationKey="copy.4ff4c70c" fallback={"CYFRA"} />}</small>
               </button>
               <button
                 className={`room-object number-object object-9 ${found.includes("number9") ? "collected" : ""}`}
                 onClick={() => collectItem(ITEMS[4])}
               >
-                9
-                <small>{found.includes("number9") ? "✓" : "CYFRA"}</small>
+                <LocalizedText translationKey="copy.1bfeb1fc" fallback={"9 "} /><small>{found.includes("number9") ? "✓" : <LocalizedText translationKey="copy.4ff4c70c" fallback={"CYFRA"} />}</small>
               </button>
               <button
                 className={`room-object hands-object ${found.includes("hands") ? "collected" : ""}`}
                 onClick={() => collectItem(ITEMS[5])}
               >
-                🕰️
-                <small>{found.includes("hands") ? "✓" : "WSKAZÓWKI"}</small>
+                <LocalizedText translationKey="copy.45f684ff" fallback={"🕰️ "} /><small>{found.includes("hands") ? "✓" : <LocalizedText translationKey="copy.ae6750e5" fallback={"WSKAZÓWKI"} />}</small>
               </button>
               <div className="desk">
-                <span>STARE BIURKO</span>
-                <span>⚙️</span>
-                <span>🗝️</span>
+                <span><LocalizedText translationKey="copy.27c71fc4" fallback={"STARE BIURKO"} /></span>
+                <span><LocalizedText translationKey="copy.ca66f5c1" fallback={"⚙️"} /></span>
+                <span><LocalizedText translationKey="copy.ef986ea0" fallback={"🗝️"} /></span>
               </div>
             </div>
             <p className="room-instruction">
-              Klikaj przedmioty w pokoju, aby je zbierać i czytać notatki.
-            </p>
+              <LocalizedText translationKey="copy.8176a4ad" fallback={"Klikaj przedmioty w pokoju, aby je zbierać i czytać notatki. "} /></p>
           </div>
 
           {selectedObject && (
             <div className="discovery-panel">
               <span className="discovery-symbol">{selectedObject.symbol}</span>
               <div>
-                <div className="eyebrow">ODKRYCIE</div>
-                <strong>{selectedObject.name}</strong>
-                <p>{selectedObject.description}</p>
+                <div className="eyebrow"><LocalizedText translationKey="copy.5d8c9f59" fallback={"ODKRYCIE"} /></div>
+                <strong><LocalizedText fallback={selectedObject.name} /></strong>
+                <p><LocalizedText fallback={selectedObject.description} /></p>
               </div>
               <button
                 className="close-button"
                 onClick={() => setSelectedObject(null)}
-                aria-label="Zamknij opis"
+                aria-label={localizeAttribute("copy.8a599cdc", "Zamknij opis")}
               >
-                ×
-              </button>
+                <LocalizedText translationKey="copy.9dbb32c2" fallback={"× "} /></button>
             </div>
           )}
 
           <div className="inventory-panel">
-            <div className="eyebrow">EKWIPUNEK — {found.length}/6</div>
+            <div className="eyebrow"><LocalizedText translationKey="copy.8ee01acc" fallback={"EKWIPUNEK — "} />{found.length}<LocalizedText translationKey="copy.99d258b8" fallback={"/6"} /></div>
             <div className="inventory-items">
               {ITEMS.map((item) => (
                 <div
@@ -1249,35 +1839,33 @@ function App() {
                   className={`inventory-item ${found.includes(item.id) ? "found" : ""}`}
                 >
                   <span>{found.includes(item.id) ? item.symbol : "?"}</span>
-                  <small>{found.includes(item.id) ? item.name : "Nieodkryte"}</small>
+                  <small>
+                    <LocalizedText
+                      fallback={found.includes(item.id) ? item.name : "Nieodkryte"}
+                    />
+                  </small>
                 </div>
               ))}
             </div>
           </div>
 
           <div className="clock-puzzle">
-            <div className="eyebrow">UKŁADANKA // PAMIĘĆ ZEGARA</div>
+            <div className="eyebrow"><LocalizedText translationKey="copy.4c8a43fd" fallback={"UKŁADANKA // PAMIĘĆ ZEGARA"} /></div>
 
-            <h2>Pamiętam… zapomniałem… która godzina?</h2>
+            <h2><LocalizedText translationKey="copy.08ca07ba" fallback={"Pamiętam… zapomniałem… która godzina?"} /></h2>
 
             <p className="puzzle-hint">
-              Runda {Math.min(clockRound, TOTAL_ROUNDS)}/{TOTAL_ROUNDS} —
-              Henryk pokazuje cztery liczby: po lewej, na górze, po prawej i
-              na dole. Zapamiętaj je, potem ułóż je na swoich miejscach (do
-              wyboru masz tylko te cztery). Gdy układ będzie dobry, odczytaj
-              godzinę ze wskazówek. Wszystkie liczby od 1 do 12 pojawią się
-              w trzech rundach.
-            </p>
+              <LocalizedText translationKey="copy.3a205f83" fallback={"Runda "} />{Math.min(clockRound, TOTAL_ROUNDS)}<LocalizedText translationKey="copy.2a0c975e" fallback={"/"} />{TOTAL_ROUNDS} <LocalizedText translationKey="copy.140c9dde" fallback={"— Henryk pokazuje cztery liczby: po lewej, na górze, po prawej i na dole. Zapamiętaj je, potem ułóż je na swoich miejscach (do wyboru masz tylko te cztery). Gdy układ będzie dobry, odczytaj godzinę ze wskazówek. Wszystkie liczby od 1 do 12 pojawią się w trzech rundach. "} /></p>
 
             <div className="clock-round-status" aria-live="polite">
-              <span>RUNDA {Math.min(clockRound, TOTAL_ROUNDS)} / {TOTAL_ROUNDS}</span>
-              <span>ZALICZONE: {clockRoundsCompleted} / {TOTAL_ROUNDS}</span>
+              <span><LocalizedText translationKey="copy.af81c003" fallback={"RUNDA "} />{Math.min(clockRound, TOTAL_ROUNDS)} <LocalizedText translationKey="copy.afd27b5a" fallback={"/ "} />{TOTAL_ROUNDS}</span>
+              <span><LocalizedText translationKey="copy.f48941fc" fallback={"ZALICZONE: "} />{clockRoundsCompleted} <LocalizedText translationKey="copy.afd27b5a" fallback={"/ "} />{TOTAL_ROUNDS}</span>
             </div>
 
             <div className="clock-board">
               <div
                 className="clock-face"
-                aria-label="Tarcza zegara"
+                aria-label={localizeAttribute("copy.b953cfb4", "Tarcza zegara")}
               >
                 {POS.map((pos, index) => (
                   <div
@@ -1316,12 +1904,12 @@ function App() {
               <div className="clock-answer-area">
                 <div className="eyebrow">
                   {clockMemorizing
-                    ? "PAMIĘTAM... ZAPAMIĘTUJ"
+                    ? <LocalizedText translationKey="copy.366b423f" fallback={"PAMIĘTAM... ZAPAMIĘTUJ"} />
                     : clockRotating
-                      ? "WSKAZÓWKI SIĘ OBRACAJĄ..."
+                      ? <LocalizedText translationKey="copy.02f283f5" fallback={"WSKAZÓWKI SIĘ OBRACAJĄ..."} />
                       : clockReading
-                        ? "ODCZYTAJ GODZINĘ"
-                        : "ZAPOMNIAŁEM... ODTWÓRZ UKŁAD"}
+                        ? <LocalizedText translationKey="copy.43bc825c" fallback={"ODCZYTAJ GODZINĘ"} />
+                        : <LocalizedText translationKey="copy.bc249a24" fallback={"ZAPOMNIAŁEM... ODTWÓRZ UKŁAD"} />}
                 </div>
 
                 {clockReading ? (
@@ -1340,17 +1928,15 @@ function App() {
                   ) : (
                     <div className="clock-time-setting">
                       <p>
-                        Ustaw godzinę z notatki Henryka:
-                        <strong> {targetTime}</strong>
+                        <LocalizedText translationKey="copy.a340768b" fallback={"Ustaw godzinę z notatki Henryka: "} /><strong> {targetTime}</strong>
                       </p>
                       <label>
-                        Twoje ustawienie
-                        <input
+                        <LocalizedText translationKey="copy.76da0262" fallback={"Twoje ustawienie "} /><input
                           className="clock-time-input"
                           type="time"
                           value={selectedTime}
                           onChange={(event) => setSelectedTime(event.target.value)}
-                          aria-label="Ustaw godzinę i minuty"
+                          aria-label={localizeAttribute("copy.f81cc766", "Ustaw godzinę i minuty")}
                         />
                       </label>
                       <button
@@ -1359,25 +1945,37 @@ function App() {
                         onClick={() => answerTime(selectedTime)}
                         disabled={!selectedTime}
                       >
-                        ZATWIERDŹ GODZINĘ →
-                      </button>
+                        <LocalizedText translationKey="copy.e7baed55" fallback={"ZATWIERDŹ GODZINĘ → "} /></button>
                     </div>
                   )
                 ) : (
                   <div className="clock-shuffle-grid">
                     {POS.map((pos, index) => (
                       <label key={pos} className="clock-answer-slot">
-                        <span>{POS_LABEL[pos]}</span>
+                        <span>
+                          <LocalizedText fallback={POS_LABEL[pos]} />
+                        </span>
 
                         <select
-                          aria-label={`Liczba: ${POS_LABEL[pos].toLowerCase()}`}
+                          aria-label={localizeAttribute(
+                            "copy.6bc55131",
+                            "Liczba: {value}",
+                            {
+                              value: localizeAttribute(
+                                translationKeyFor(POS_LABEL[pos]),
+                                POS_LABEL[pos],
+                              ).toLocaleLowerCase(
+                                language === "pl" ? "pl-PL" : "en-US",
+                              ),
+                            },
+                          )}
                           value={clockSlots[index] ?? ""}
                           onChange={(event) =>
                             setClockSlot(index, event.target.value)
                           }
                           disabled={clockMemorizing || clockRotating}
                         >
-                          <option value="">?</option>
+                          <option value=""><LocalizedText translationKey="copy.3a0cb08e" fallback={"?"} /></option>
 
                           {choices.map((digit) => (
                             <option
@@ -1405,8 +2003,7 @@ function App() {
                 onClick={resetClockShuffle}
                 disabled={clockRotating}
               >
-                ↻ RESETUJ ROZSYPANKĘ
-              </button>
+                <LocalizedText translationKey="copy.ab2ed2d5" fallback={"↻ RESETUJ ROZSYPANKĘ "} /></button>
 
               <button
                 className="primary-button"
@@ -1418,7 +2015,7 @@ function App() {
                   clockReading
                 }
               >
-                SPRAWDŹ UKŁAD <span>→</span>
+                <LocalizedText translationKey="copy.a934ad77" fallback={"SPRAWDŹ UKŁAD "} /><span><LocalizedText translationKey="copy.973c7cf5" fallback={"→"} /></span>
               </button>
             </div>
 
@@ -1429,75 +2026,105 @@ function App() {
         </section>
       )}
 
+      {screen === "level3intro" && (
+        <Room56
+          onComplete={() => continueAfterLevel("room56")}
+          voiceEnabled={voiceEnabled}
+        />
+      )}
+
       {screen === "success" && (
         <section className="screen ending-screen">
           <ClockMemoryBackdrop mode="clock" />
-          <div className="success-icon">✓</div>
-          <div className="eyebrow">MISJA 02 // ZAKOŃCZONA</div>
+          <div className="success-icon"><LocalizedText translationKey="copy.163a1ee2" fallback={"✓"} /></div>
+          <div className="eyebrow"><LocalizedText translationKey="copy.bc4c1959" fallback={"POKÓJ 34 // ZAPIS ODTWORZONY"} /></div>
           <h1>
-            CZAS
-            <br />
-            <span className="accent">RUSZYŁ DALEJ.</span>
+            <LocalizedText translationKey="copy.95c51ec8" fallback={"CZAS "} /><br />
+            <span className="accent"><LocalizedText translationKey="copy.1b5acbd1" fallback={"RUSZYŁ DALEJ."} /></span>
           </h1>
           <p className="lead">
-            Tik... tak... Wskazówki zatrzymują się na właściwej godzinie.
-            Zegar wydaje cichy dźwięk, a zamek w drzwiach ustępuje.
-          </p>
+            <LocalizedText translationKey="copy.e7a31ba9" fallback={"Tik... tak... Wskazówki zatrzymują się na właściwej godzinie. Rekonstrukcja zapisu jest kompletna, a skrót synaptyczny otwarty. "} /></p>
           <blockquote>
-            Na odwrocie tarczy znajdujesz ostatnią wiadomość Henryka:
-            „Jeśli to czytasz, znaczy, że ktoś wreszcie zrozumiał.”
-          </blockquote>
+            <LocalizedText translationKey="copy.07a10929" fallback={"Na odwrocie tarczy znajduje się notatka Profesora: „Jeśli układ się rozsypie, zacznij od jednej chwili.” "} /></blockquote>
           <div className="stats-grid">
             <div className="stat-card">
-              <span>POZOSTAŁY CZAS</span>
+              <span><LocalizedText translationKey="copy.c2b02f8a" fallback={"POZOSTAŁY CZAS"} /></span>
               <strong>{formatTime(secondsLeft)}</strong>
             </div>
             <div className="stat-card">
-              <span>ODNALEZIONE</span>
-              <strong>{found.length}/6</strong>
+              <span><LocalizedText translationKey="copy.a6199a97" fallback={"ODNALEZIONE"} /></span>
+              <strong>{found.length}<LocalizedText translationKey="copy.99d258b8" fallback={"/6"} /></strong>
             </div>
             <div className="stat-card">
-              <span>PRÓBY</span>
+              <span><LocalizedText translationKey="copy.3945d059" fallback={"PRÓBY"} /></span>
               <strong>{level2Attempts}</strong>
             </div>
           </div>
-          <button className="primary-button" onClick={() => setScreen("intro")}>
-            WRÓĆ DO MENU <span>→</span>
-          </button>
+          {nextEnabledLevel ? (
+            <>
+              <div className="mission-card unlocked">
+                <div className="mission-number">
+                  {String(nextEnabledLevel.number).padStart(2, "0")}
+                </div>
+                <div>
+                  <div className="eyebrow"><LocalizedText translationKey="copy.6afa9d24" fallback={"NASTĘPNA MISJA"} /></div>
+                  <h2><LocalizedText fallback={nextEnabledLevel.title} /></h2>
+                  <p><LocalizedText fallback={nextEnabledLevel.description} /></p>
+                </div>
+                <span className="mission-lock"><LocalizedText translationKey="copy.de2d29a1" fallback={"🔓"} /></span>
+              </div>
+              <button
+                className="primary-button"
+                onClick={startNextEnabledLevel}
+              >
+                <LocalizedText translationKey="copy.c4f27c1b" fallback={"PRZEJDŹ DO LEVELU "} />{nextEnabledLevel.number} <span><LocalizedText translationKey="copy.973c7cf5" fallback={"→"} /></span>
+              </button>
+            </>
+          ) : (
+            <button
+              className="primary-button"
+              onClick={() => continueAfterLevel("room34")}
+            >
+              <LocalizedText translationKey="copy.9c35c82f" fallback={"ZAKOŃCZ KAMPANIĘ "} /><span><LocalizedText translationKey="copy.163a1ee2" fallback={"✓"} /></span>
+            </button>
+          )}
+          <button className="text-button" onClick={() => setScreen("intro")}>
+            <LocalizedText translationKey="copy.0e3cfa96" fallback={"Wróć do menu "} /></button>
           <button className="text-button" onClick={startLevel2}>
-            ↻ Zagraj w Level 2 ponownie
-          </button>
+            <LocalizedText translationKey="copy.49637383" fallback={"↻ Zagraj w Level 2 ponownie "} /></button>
         </section>
       )}
 
       {screen === "failed" && (
         <section className="screen ending-screen">
-          <div className="failure-icon">×</div>
-          <div className="eyebrow">MISJA 02 // CZAS MINĄŁ</div>
+          <div className="failure-icon"><LocalizedText translationKey="copy.520b4356" fallback={"×"} /></div>
+          <div className="eyebrow"><LocalizedText translationKey="copy.32061109" fallback={"POKÓJ 34 // ZAPIS NIEKOMPLETNY"} /></div>
           <h1>
-            ZAMEK
-            <br />
-            <span className="danger-text">ZATRZAŚNIĘTY.</span>
+            <LocalizedText translationKey="copy.5fb52e49" fallback={"ZAMEK "} /><br />
+            <span className="danger-text"><LocalizedText translationKey="copy.baf1f1bd" fallback={"ZATRZAŚNIĘTY."} /></span>
           </h1>
           <p className="lead">
-            Mechanizm zablokował drzwi. Historia Henryka nadal kryje
-            odpowiedź — spróbuj ponownie, tym razem uważniej.
-          </p>
+            <LocalizedText translationKey="copy.9b1244a3" fallback={"Rekonstrukcja czasu nie została ukończona. Zachowane ślady nadal są dostępne — możesz spróbować ponownie. "} /></p>
           <button className="primary-button" onClick={startLevel2}>
-            SPRÓBUJ PONOWNIE <span>↻</span>
+            <LocalizedText translationKey="copy.be71f905" fallback={"SPRÓBUJ PONOWNIE "} /><span><LocalizedText translationKey="copy.be3cba5a" fallback={"↻"} /></span>
           </button>
           <button className="text-button" onClick={() => setScreen("transition")}>
-            Wróć do przejścia między misjami
-          </button>
+            <LocalizedText translationKey="copy.2dc690c6" fallback={"Wróć do przejścia między misjami "} /></button>
         </section>
       )}
 
       <footer className="game-footer">
-        <span>ESCAPE ROOM // INTERACTIVE PUZZLE EXPERIENCE</span>
-        <span>BUILD 0.3.0</span>
+        <span><LocalizedText translationKey="copy.a10d5c99" fallback={"ESCAPE ROOM // INTERACTIVE PUZZLE EXPERIENCE"} /></span>
+        <span><LocalizedText translationKey="copy.0ffdb80a" fallback={"BUILD 0.3.0"} /></span>
       </footer>
     </main>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <TranslationProvider>
+      <AppContent />
+    </TranslationProvider>
+  );
+}

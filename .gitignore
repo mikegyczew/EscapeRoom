@@ -3,6 +3,9 @@
 **/obj/
 *.user
 *.suo
+*.db
+*.db-shm
+*.db-wal
 
 # Node.js / Vite
 **/node_modules/

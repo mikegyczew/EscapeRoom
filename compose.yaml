@@ -5,8 +5,12 @@ services:
       dockerfile: Backend/Dockerfile
     environment:
       ASPNETCORE_URLS: http://0.0.0.0:10000
+      ConnectionStrings__DefaultConnection: Data Source=/app/data/escape-room.db
+      DataProtection__KeysDirectory: /app/data/keys
     ports:
       - "5167:10000"
+    volumes:
+      - escape-room-data:/app/data
     restart: unless-stopped
 
   frontend:
@@ -20,3 +24,6 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+volumes:
+  escape-room-data:

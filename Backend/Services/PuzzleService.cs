@@ -2,7 +2,7 @@ namespace EscapeRoom.Api.Services;
 
 public sealed class PuzzleService
 {
-    public const string Password = "rozpoczynamy misje";
+    public const string Password = "start";
 
     public char? GetLetterAt(int position)
     {
@@ -17,5 +17,10 @@ public sealed class PuzzleService
     public string GetBinaryCode(char character)
     {
         return Convert.ToString(character, 2).PadLeft(8, '0');
+    }
+
+    public string[] GetBinaryCodes()
+    {
+        return Password.Select(GetBinaryCode).ToArray();
     }
 }
