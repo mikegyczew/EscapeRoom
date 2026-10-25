@@ -14,7 +14,7 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
     environment:
-      BACKEND_HOST: backend:10000
+      BACKEND_URL: http://backend:10000
     ports:
       - "3001:80"
     depends_on:

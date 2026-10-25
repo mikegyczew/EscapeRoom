@@ -20,8 +20,5 @@ services:
     dockerContext: .
     healthCheckPath: /
     envVars:
-      - key: BACKEND_HOST
-        fromService:
-          type: web
-          name: escaperoom-api
-          property: hostport
+      - key: BACKEND_URL
+        value: https://escaperoom-xlzw.onrender.com

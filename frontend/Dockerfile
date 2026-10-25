@@ -11,5 +11,5 @@ FROM nginx:alpine
 COPY --from=build /app/dist/ /usr/share/nginx/html/
 COPY frontend/nginx.conf.template /etc/nginx/templates/default.conf.template
 
-ENV NGINX_ENVSUBST_FILTER=^BACKEND_HOST$
+ENV NGINX_ENVSUBST_FILTER=^BACKEND_URL$
 EXPOSE 80
