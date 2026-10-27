@@ -11,18 +11,19 @@ Przy pierwszym wejściu można utworzyć konto e-mail i hasło. Konta oraz sesje
 uwierzytelniania obsługuje backend, a dane kont są przechowywane w wolumenie
 Docker `escape-room-data`. Hasło musi mieć co najmniej 8 znaków i zawierać
 cyfrę. Wysyłka wiadomości do potwierdzania adresu ani odzyskiwania hasła nie
-jest dostępna, dopóki nie skonfigurujesz Resend; konta są aktywne od razu po
+jest dostępna, dopóki nie skonfigurujesz Mailjet; konta są aktywne od razu po
 rejestracji.
 
-Odzyskiwanie hasła używa API Resend przez HTTPS. W `.env` ustaw
-`RESEND_API_KEY`, `RESEND_FROM_ADDRESS` (adres nadawcy zweryfikowany w Resend)
-i `FRONTEND_BASE_URL` (`http://localhost:3001` lokalnie). W Render dodaj
-`Resend__ApiKey` i `Resend__FromAddress` jako sekrety, a
-`Resend__FrontendBaseUrl` ustaw na publiczny adres frontendu. Bez klucza API i
-zweryfikowanego nadawcy link do odzyskiwania hasła pozostaje niedostępny.
+Odzyskiwanie hasła używa Send API v3.1 Mailjet przez HTTPS. W `.env` ustaw
+`MAILJET_API_KEY`, `MAILJET_SECRET_KEY`, `MAILJET_FROM_ADDRESS` (adres nadawcy
+zweryfikowany w Mailjet), opcjonalnie `MAILJET_FROM_NAME` oraz
+`FRONTEND_BASE_URL` (`http://localhost:3001` lokalnie). W Render dodaj
+`Mailjet__ApiKey`, `Mailjet__SecretKey` i `Mailjet__FromAddress` jako sekrety,
+a `Mailjet__FrontendBaseUrl` ustaw na publiczny adres frontendu.
+Bez kluczy API i zweryfikowanego nadawcy link do odzyskiwania hasła pozostaje niedostępny.
 Użytkownik dostaje jednorazowy link; reset jest obsługiwany przez wbudowane
-endpointy ASP.NET Identity. Klucz Resend trzymaj wyłącznie w `.env` lokalnie
-lub w sekretach Rendera — nie zapisuj go w repozytorium. Przykładowe żądania
+endpointy ASP.NET Identity. Dane dostępowe Mailjet trzymaj wyłącznie w `.env`
+lokalnie lub w sekretach Rendera — nie zapisuj ich w repozytorium. Przykładowe żądania
 API znajdują się w [PasswordRecovery.http](./Backend/PasswordRecovery.http).
 
 Aby utworzyć konto administratora przy starcie, skopiuj `.env.example` do

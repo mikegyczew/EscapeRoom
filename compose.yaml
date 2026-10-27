@@ -10,9 +10,11 @@ services:
       AdminBootstrap__Username: ${ADMIN_BOOTSTRAP_USERNAME:-}
       AdminBootstrap__Password: ${ADMIN_BOOTSTRAP_PASSWORD:-}
       AdminBootstrap__Email: ${ADMIN_BOOTSTRAP_EMAIL:-}
-      Resend__ApiKey: ${RESEND_API_KEY:-}
-      Resend__FromAddress: ${RESEND_FROM_ADDRESS:-}
-      Resend__FrontendBaseUrl: ${FRONTEND_BASE_URL:-http://localhost:3001}
+      Mailjet__ApiKey: ${MAILJET_API_KEY:-}
+      Mailjet__SecretKey: ${MAILJET_SECRET_KEY:-}
+      Mailjet__FromAddress: ${MAILJET_FROM_ADDRESS:-}
+      Mailjet__FromName: ${MAILJET_FROM_NAME:-Escape Room}
+      Mailjet__FrontendBaseUrl: ${FRONTEND_BASE_URL:-http://localhost:3001}
     ports:
       - "5167:10000"
     volumes:

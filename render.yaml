@@ -10,11 +10,15 @@ services:
     envVars:
       - key: ASPNETCORE_URLS
         value: http://0.0.0.0:10000
-      - key: Resend__ApiKey
+      - key: Mailjet__ApiKey
         sync: false
-      - key: Resend__FromAddress
+      - key: Mailjet__SecretKey
         sync: false
-      - key: Resend__FrontendBaseUrl
+      - key: Mailjet__FromAddress
+        sync: false
+      - key: Mailjet__FromName
+        value: Escape Room
+      - key: Mailjet__FrontendBaseUrl
         value: https://escaperoom-front.onrender.com
 
   - type: web

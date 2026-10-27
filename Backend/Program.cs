@@ -20,9 +20,9 @@ builder.Services.AddScoped<PuzzleHandlerRegistry>();
 builder.Services.AddScoped<PuzzleService>();
 builder.Services.AddScoped<AdminContentService>();
 builder.Services.AddScoped<AdminDatabaseService>();
-builder.Services.AddHttpClient<ResendEmailSender>(client =>
+builder.Services.AddHttpClient<MailjetEmailSender>(client =>
 {
-    client.BaseAddress = new Uri("https://api.resend.com/");
+    client.BaseAddress = new Uri("https://api.mailjet.com/v3.1/");
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 
@@ -63,7 +63,7 @@ builder.Services
     .AddRoles<IdentityRole>()
     .AddEntityFrameworkStores<ApplicationDbContext>();
 builder.Services.AddScoped<IEmailSender<IdentityUser>>(services =>
-    services.GetRequiredService<ResendEmailSender>());
+    services.GetRequiredService<MailjetEmailSender>());
 builder.Services.ConfigureApplicationCookie(options =>
 {
     options.Cookie.Name = "EscapeRoom.Auth";
@@ -198,7 +198,7 @@ using (var scope = app.Services.CreateScope())
 
 var auth = app.MapGroup("/api/auth");
 auth.MapIdentityApi<IdentityUser>();
-auth.MapGet("/password-recovery/status", (ResendEmailSender emailSender) =>
+auth.MapGet("/password-recovery/status", (MailjetEmailSender emailSender) =>
     Results.Ok(new { available = emailSender.IsConfigured }));
 auth.MapGet("/me", async (ClaimsPrincipal principal, UserManager<IdentityUser> users) =>
     {
