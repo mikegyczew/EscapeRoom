@@ -1,0 +1,60 @@
+@baseUrl = http://localhost:5167
+@adminCookie = replace-with-EscapeRoom.Auth-cookie
+@storyTranslationId = replace-with-story-translation-id
+@roomContentTranslationId = replace-with-room-translation-id
+@puzzleTranslationId = replace-with-puzzle-translation-id
+
+### List the database tables (admin session required)
+GET {{baseUrl}}/api/admin/database/tables
+Cookie: EscapeRoom.Auth={{adminCookie}}
+
+### Read a page of story translations
+GET {{baseUrl}}/api/admin/database/StoryTranslations?offset=0&limit=50
+Cookie: EscapeRoom.Auth={{adminCookie}}
+
+### Update story name and description
+PUT {{baseUrl}}/api/admin/database/StoryTranslations/text
+Cookie: EscapeRoom.Auth={{adminCookie}}
+Content-Type: application/json
+
+{
+  "key": { "Id": "{{storyTranslationId}}" },
+  "values": {
+    "Name": "Updated story name",
+    "Description": "Updated story description"
+  }
+}
+
+### Update room content text
+PUT {{baseUrl}}/api/admin/database/RoomContentTranslations/text
+Cookie: EscapeRoom.Auth={{adminCookie}}
+Content-Type: application/json
+
+{
+  "key": { "Id": "{{roomContentTranslationId}}" },
+  "values": { "Text": "Updated room text" }
+}
+
+### Update a puzzle instruction and hints
+PUT {{baseUrl}}/api/admin/database/PuzzleInstanceTranslations/text
+Cookie: EscapeRoom.Auth={{adminCookie}}
+Content-Type: application/json
+
+{
+  "key": { "Id": "{{puzzleTranslationId}}" },
+  "values": {
+    "Instruction": "Updated instruction",
+    "Hint1": "Updated first hint",
+    "Hint2": "Updated second hint"
+  }
+}
+
+### Update a localized interface string
+PUT {{baseUrl}}/api/admin/database/LocalizedTexts/text
+Cookie: EscapeRoom.Auth={{adminCookie}}
+Content-Type: application/json
+
+{
+  "key": { "Language": "en", "Key": "copy.example" },
+  "values": { "Value": "Updated interface text" }
+}

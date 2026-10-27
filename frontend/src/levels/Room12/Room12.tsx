@@ -4,7 +4,7 @@ import { LocalizedText } from "../../shared/localized-text";
 
 
 type Room12Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const DIRECTIONS = [
@@ -27,6 +27,7 @@ export default function Room12({ onComplete }: Room12Props) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [activePulse, setActivePulse] = useState(-1);
   const [response, setResponse] = useState<string[]>([]);
+  const [solvedDirections, setSolvedDirections] = useState<string[]>([]);
   const [feedback, setFeedback] = useState("");
 
   const pattern = VIBRATION_ROUNDS[round];
@@ -74,10 +75,13 @@ export default function Room12({ onComplete }: Room12Props) {
 
     if (round === VIBRATION_ROUNDS.length - 1) {
       setFeedback(text("room12.complete", "Ostatni ślad zapisany. Śluza akustyczna otwiera przejście."));
-      window.setTimeout(onComplete, 700);
+      const fullSequence = [...solvedDirections, ...nextResponse];
+      setSolvedDirections(fullSequence);
+      window.setTimeout(() => onComplete(JSON.stringify(fullSequence)), 700);
       return;
     }
 
+    setSolvedDirections((previous) => [...previous, ...nextResponse]);
     setRound((previous) => previous + 1);
     setResponse([]);
     setFeedback(text("room12.roundComplete", "Sekwencja zachowana. Odczytaj kolejny ślad podłogi."));

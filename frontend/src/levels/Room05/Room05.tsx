@@ -4,7 +4,7 @@ import { LocalizedText } from "../../shared/localized-text";
 
 
 type Room05Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const FILM_FRAME_DIGITS = ["2", "7", "4", "1"];
@@ -25,7 +25,7 @@ export default function Room05({ onComplete }: Room05Props) {
 
     if (answer === FILM_FRAME_DIGITS.join("")) {
       setFeedback(text("room05.complete", "Zapis z 1945 roku odtworzony. Projektor odzyskał ciąg."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(() => onComplete(answer), 700);
       return;
     }
 

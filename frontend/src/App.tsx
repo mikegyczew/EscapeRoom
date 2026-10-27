@@ -1,13 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import "./App.css";
 import {
-  ACTIVE_LEVEL_COUNT,
-  ENABLED_LEVELS,
-  getNextEnabledLevel,
   isLevelEnabled,
   LEVELS,
 } from "./levels/registry";
-import type { LevelId } from "./levels/types";
+import type { LevelDefinition, LevelId } from "./levels/types";
 import Room01 from "./levels/Room01/Room01";
 import Room05 from "./levels/Room05/Room05";
 import Room11 from "./levels/Room11/Room11";
@@ -53,10 +50,21 @@ import { TranslationProvider } from "./shared/translations";
 import { useTranslation } from "./shared/use-translation";
 import { LocalizedText } from "./shared/localized-text";
 import { translationKeyFor } from "./shared/translation-key";
+import AdminPanel from "./admin/AdminPanel";
+import {
+  fetchStories,
+  fetchStoryProgress,
+  submitPuzzleAnswer,
+  type StoryCatalogItem,
+  type StoryProgress,
+} from "./shared/stories";
+
+type StoryLevel = LevelDefinition & { order: number; roomNumber: number };
 
 
 type Screen =
   | "lobby"
+  | "admin"
   | "intro"
   | "level1"
   | "room05"
@@ -92,8 +100,97 @@ type Screen =
 
 type LoginScreenProps = {
   initialError?: string;
-  onAuthenticated: (email: string) => void;
+  onAuthenticated: (user: AuthenticatedUser) => void;
 };
+
+type PasswordResetLink = {
+  email: string;
+  code: string;
+};
+
+type BackendConnectionState = "checking" | "online" | "offline";
+
+type AuthenticatedUser = {
+  displayName: string;
+  isAdmin: boolean;
+};
+
+function useBackendConnection(): BackendConnectionState {
+  const [connectionState, setConnectionState] =
+    useState<BackendConnectionState>("checking");
+
+  useEffect(() => {
+    let active = true;
+    let retryTimer: number | undefined;
+    let requestController: AbortController | undefined;
+
+    async function checkConnection() {
+      requestController = new AbortController();
+      const timeoutTimer = window.setTimeout(
+        () => requestController?.abort(),
+        15_000,
+      );
+
+      try {
+        const response = await fetch("/healthz", {
+          cache: "no-store",
+          signal: requestController.signal,
+        });
+        if (!response.ok) {
+          throw new Error(`Backend health check returned ${response.status}.`);
+        }
+        const body: unknown = await response.json();
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          !("status" in body) ||
+          body.status !== "healthy"
+        ) {
+          throw new Error("Backend health check returned an unexpected response.");
+        }
+        if (active) setConnectionState("online");
+      } catch {
+        if (active) setConnectionState("offline");
+      } finally {
+        window.clearTimeout(timeoutTimer);
+        if (active) {
+          retryTimer = window.setTimeout(() => void checkConnection(), 10_000);
+        }
+      }
+    }
+
+    void checkConnection();
+    return () => {
+      active = false;
+      window.clearTimeout(retryTimer);
+      requestController?.abort();
+    };
+  }, []);
+
+  return connectionState;
+}
+
+function BackendConnectionStatus() {
+  const { language } = useTranslation();
+  const connectionState = useBackendConnection();
+  const label =
+    connectionState === "online"
+      ? "SYSTEM ONLINE"
+      : connectionState === "checking"
+        ? language === "pl" ? "ŁĄCZENIE..." : "CONNECTING..."
+        : language === "pl" ? "BRAK POŁĄCZENIA" : "BACKEND OFFLINE";
+
+  return (
+    <div
+      aria-live="polite"
+      className={`system-status backend-status ${connectionState}`}
+      role="status"
+    >
+      <span className={`status-dot ${connectionState}`} />
+      {label}
+    </div>
+  );
+}
 
 async function getApiError(response: Response): Promise<string> {
   try {
@@ -120,32 +217,101 @@ async function getApiError(response: Response): Promise<string> {
   return "Nie udało się wykonać tej operacji.";
 }
 
-async function getAuthenticatedEmail(response: Response): Promise<string> {
+async function getAuthenticatedUser(response: Response): Promise<AuthenticatedUser> {
   const body: unknown = await response.json();
   if (
     typeof body !== "object" ||
     body === null ||
+    !("isAdmin" in body) ||
+    typeof body.isAdmin !== "boolean" ||
+    !("userName" in body) ||
+    typeof body.userName !== "string" ||
     !("email" in body) ||
-    typeof body.email !== "string"
+    !(typeof body.email === "string" || body.email === null)
   ) {
-    throw new Error("Serwer zwrócił nieprawidłowe dane konta.");
+    throw new Error("Serwer zwrócił nieprawidłowe dane użytkownika.");
   }
-  return body.email;
+  return {
+    displayName: body.userName || body.email || "Użytkownik",
+    isAdmin: body.isAdmin,
+  };
 }
 
 function LoginScreen({ initialError, onAuthenticated }: LoginScreenProps) {
   const { text: localizeAttribute } = useTranslation();
   const { language, setLanguage } = useTranslation();
   const [isRegistering, setIsRegistering] = useState(false);
-  const [email, setEmail] = useState("");
+  const [isRequestingPasswordReset, setIsRequestingPasswordReset] = useState(false);
+  const [passwordRecoveryAvailable, setPasswordRecoveryAvailable] = useState(false);
+  const [passwordRecoveryStatusChecked, setPasswordRecoveryStatusChecked] = useState(false);
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState(initialError ?? "");
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/auth/password-recovery/status")
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(await getApiError(response));
+        }
+        const body: unknown = await response.json();
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          !("available" in body) ||
+          typeof body.available !== "boolean"
+        ) {
+          throw new Error("Serwer zwrócił nieprawidłowy status odzyskiwania hasła.");
+        }
+        if (active) setPasswordRecoveryAvailable(body.available);
+      })
+      .catch(() => {
+        if (active) setPasswordRecoveryAvailable(false);
+      })
+      .finally(() => {
+        if (active) setPasswordRecoveryStatusChecked(true);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage("");
+    if (isRequestingPasswordReset) {
+      setSubmitting(true);
+      try {
+        const response = await fetch("/api/auth/forgotPassword", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: identifier }),
+        });
+        if (!response.ok) {
+          setMessage(await getApiError(response));
+          return;
+        }
+        setMessage(
+          language === "pl"
+            ? "Jeśli konto jest powiązane z tym adresem, wysłaliśmy link do zmiany hasła."
+            : "If an account is associated with this address, a password reset link has been sent.",
+        );
+      } catch {
+        setMessage(
+          language === "pl"
+            ? "Nie udało się połączyć z serwerem. Spróbuj ponownie."
+            : "Could not connect to the server. Please try again.",
+        );
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     if (isRegistering && password !== confirmPassword) {
       setMessage(localizeAttribute("copy.2438937c", "Hasła nie są takie same."));
       return;
@@ -158,7 +324,7 @@ function LoginScreen({ initialError, onAuthenticated }: LoginScreenProps) {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ email: identifier, password }),
         });
         if (!registration.ok) {
           setMessage(await getApiError(registration));
@@ -166,11 +332,11 @@ function LoginScreen({ initialError, onAuthenticated }: LoginScreenProps) {
         }
       }
 
-      const login = await fetch("/api/auth/login?useCookies=true", {
+      const login = await fetch("/api/auth/login-identifier", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ identifier, password }),
       });
       if (!login.ok) {
         setMessage(
@@ -191,7 +357,7 @@ function LoginScreen({ initialError, onAuthenticated }: LoginScreenProps) {
         setMessage(localizeAttribute("copy.9af9808d", "Logowanie nie zostało potwierdzone przez serwer."));
         return;
       }
-      onAuthenticated(await getAuthenticatedEmail(currentUser));
+      onAuthenticated(await getAuthenticatedUser(currentUser));
     } catch {
       setMessage(
         localizeAttribute("copy.44fbdce3", "Nie można połączyć się z serwerem. Sprawdź, czy aplikacja działa, i spróbuj ponownie."),
@@ -209,9 +375,7 @@ function LoginScreen({ initialError, onAuthenticated }: LoginScreenProps) {
           <span className="brand-mark"><LocalizedText translationKey="copy.1d4075e7" fallback={"⌘"} /></span>
           <span><LocalizedText translationKey="copy.a1be99c2" fallback={"LABORATORIUM "} /><span className="accent"><LocalizedText translationKey="copy.39dcb3b2" fallback={"PROFESORA"} /></span></span>
         </div>
-        <div className="system-status">
-          <span className="status-dot" />
-          <LocalizedText translationKey="copy.f3f911dd" fallback={"SYSTEM ONLINE "} /></div>
+        <BackendConnectionStatus />
         <button
           aria-label={language === "pl" ? "Switch language to English" : "Zmień język na polski"}
           className="language-toggle"
@@ -228,29 +392,39 @@ function LoginScreen({ initialError, onAuthenticated }: LoginScreenProps) {
           <span className="accent"><LocalizedText translationKey="copy.6b76a056" fallback={"LABORATORIUM"} /></span>
         </h1>
         <p className="lead">
-          <LocalizedText translationKey="copy.b32efa5a" fallback={"Zaloguj się lub utwórz konto, aby wybrać escape room i kontynuować przygodę. "} /></p>
+          {isRequestingPasswordReset
+            ? language === "pl"
+              ? "Podaj adres e-mail powiązany z kontem."
+              : "Enter the email address associated with your account."
+            : <LocalizedText translationKey="copy.b32efa5a" fallback={"Zaloguj się lub utwórz konto, aby wybrać escape room i kontynuować przygodę. "} />}
+        </p>
         <form className="auth-form" onSubmit={(event) => void submit(event)}>
           <label>
-            <LocalizedText translationKey="copy.8fa0f8dd" fallback={"ADRES E-MAIL "} /><input
-              autoComplete="email"
+            <LocalizedText
+              translationKey={isRegistering || isRequestingPasswordReset ? "copy.8fa0f8dd" : "auth.loginIdentifier"}
+              fallback={isRegistering || isRequestingPasswordReset ? "ADRES E-MAIL " : "LOGIN LUB E-MAIL "}
+            /><input
+              autoComplete={isRegistering || isRequestingPasswordReset ? "email" : "username"}
               autoFocus
-              onChange={(event) => setEmail(event.target.value)}
+              onChange={(event) => setIdentifier(event.target.value)}
               required
-              type="email"
-              value={email}
+              type={isRegistering || isRequestingPasswordReset ? "email" : "text"}
+              value={identifier}
             />
           </label>
-          <label>
-            <LocalizedText translationKey="copy.bf5362b1" fallback={"HASŁO "} /><input
-              autoComplete={isRegistering ? "new-password" : "current-password"}
-              minLength={8}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              type="password"
-              value={password}
-            />
-          </label>
-          {isRegistering && (
+          {!isRequestingPasswordReset && (
+            <label>
+              <LocalizedText translationKey="copy.bf5362b1" fallback={"HASŁO "} /><input
+                autoComplete={isRegistering ? "new-password" : "current-password"}
+                minLength={8}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                type="password"
+                value={password}
+              />
+            </label>
+          )}
+          {isRegistering && !isRequestingPasswordReset && (
             <label>
               <LocalizedText translationKey="copy.19d993d8" fallback={"POWTÓRZ HASŁO "} /><input
                 autoComplete="new-password"
@@ -268,26 +442,201 @@ function LoginScreen({ initialError, onAuthenticated }: LoginScreenProps) {
           <button className="primary-button auth-submit" disabled={submitting} type="submit">
             {submitting
               ? <LocalizedText translationKey="copy.80bcdd86" fallback={"ŁĄCZENIE Z ARCHIWUM..."} />
-              : isRegistering
+              : isRequestingPasswordReset
+                ? language === "pl" ? "WYŚLIJ LINK DO RESETU" : "SEND RESET LINK"
+                : isRegistering
                 ? <LocalizedText translationKey="copy.0eca5487" fallback={"UTWÓRZ KONTO"} />
                 : <LocalizedText translationKey="copy.d52c13d1" fallback={"ZALOGUJ SIĘ"} />}
             {!submitting && <span> <LocalizedText translationKey="copy.973c7cf5" fallback={"→"} /></span>}
           </button>
         </form>
-        <button
-          className="text-button auth-mode-toggle"
-          disabled={submitting}
-          onClick={() => {
-            setIsRegistering((registering) => !registering);
-            setMessage("");
-          }}
-          type="button"
-        >
-          {isRegistering ? <LocalizedText translationKey="copy.d4453a62" fallback={"Masz już konto? Zaloguj się."} /> : <LocalizedText translationKey="copy.73b9a228" fallback={"Nie masz konta? Utwórz je."} />}
-        </button>
+        {isRequestingPasswordReset ? (
+          <button
+            className="text-button auth-mode-toggle"
+            disabled={submitting}
+            onClick={() => {
+              setIsRequestingPasswordReset(false);
+              setMessage("");
+            }}
+            type="button"
+          >
+            {language === "pl" ? "Wróć do logowania" : "Back to sign in"}
+          </button>
+        ) : (
+          <>
+            <button
+              className="text-button auth-mode-toggle"
+              disabled={submitting}
+              onClick={() => {
+                setIsRegistering((registering) => !registering);
+                setMessage("");
+              }}
+              type="button"
+            >
+              {isRegistering ? <LocalizedText translationKey="copy.d4453a62" fallback={"Masz już konto? Zaloguj się."} /> : <LocalizedText translationKey="copy.73b9a228" fallback={"Nie masz konta? Utwórz je."} />}
+            </button>
+            {!isRegistering && passwordRecoveryAvailable && (
+              <button
+                className="text-button auth-mode-toggle"
+                disabled={submitting}
+                onClick={() => {
+                  setIsRequestingPasswordReset(true);
+                  setMessage("");
+                }}
+                type="button"
+              >
+                {language === "pl" ? "Nie pamiętasz hasła?" : "Forgot your password?"}
+              </button>
+            )}
+            {!isRegistering && passwordRecoveryStatusChecked && !passwordRecoveryAvailable && (
+              <p className="auth-password-hint">
+                {language === "pl"
+                  ? "Odzyskiwanie hasła jest chwilowo niedostępne."
+                  : "Password recovery is currently unavailable."}
+              </p>
+            )}
+          </>
+        )}
         {isRegistering && (
           <p className="auth-password-hint">
             <LocalizedText translationKey="copy.c4d88102" fallback={"Hasło musi mieć co najmniej 8 znaków, w tym jedną cyfrę. "} /></p>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function PasswordResetScreen({
+  resetLink,
+  onComplete,
+}: {
+  resetLink: PasswordResetLink;
+  onComplete: () => void;
+}) {
+  const { language, setLanguage } = useTranslation();
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [completed, setCompleted] = useState(false);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.hash = "";
+    window.history.replaceState(
+      null,
+      "",
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }, []);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage("");
+    if (password !== confirmPassword) {
+      setMessage(language === "pl" ? "Hasła nie są takie same." : "The passwords do not match.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const response = await fetch("/api/auth/resetPassword", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: resetLink.email,
+          resetCode: resetLink.code,
+          newPassword: password,
+        }),
+      });
+      if (!response.ok) {
+        setMessage(await getApiError(response));
+        return;
+      }
+      setCompleted(true);
+    } catch {
+      setMessage(
+        language === "pl"
+          ? "Nie udało się połączyć z serwerem. Spróbuj ponownie."
+          : "Could not connect to the server. Please try again.",
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="game-shell">
+      <MatrixRain />
+      <header className="game-header auth-header">
+        <div className="brand">
+          <span className="brand-mark">⌘</span>
+          <span>LABORATORIUM <span className="accent">PROFESORA</span></span>
+        </div>
+        <BackendConnectionStatus />
+        <button
+          aria-label={language === "pl" ? "Switch language to English" : "Zmień język na polski"}
+          className="language-toggle"
+          onClick={() => setLanguage(language === "pl" ? "en" : "pl")}
+          type="button"
+        >
+          {language === "pl" ? "EN" : "PL"}
+        </button>
+      </header>
+      <section className="auth-panel">
+        <div className="eyebrow">ESCAPE ROOM</div>
+        <h1>
+          {language === "pl" ? "USTAW NOWE " : "SET A NEW "}
+          <span className="accent">{language === "pl" ? "HASŁO" : "PASSWORD"}</span>
+        </h1>
+        {completed ? (
+          <>
+            <p className="auth-message" role="status">
+              {language === "pl" ? "Hasło zostało zmienione." : "Your password has been changed."}
+            </p>
+            <button className="primary-button auth-submit" onClick={onComplete} type="button">
+              {language === "pl" ? "WRÓĆ DO LOGOWANIA" : "RETURN TO SIGN IN"}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="lead">{resetLink.email}</p>
+            <p className="auth-password-hint">
+              {language === "pl"
+                ? "Hasło musi mieć co najmniej 8 znaków i zawierać cyfrę."
+                : "Password must be at least 8 characters and contain a digit."}
+            </p>
+            <form className="auth-form" onSubmit={(event) => void submit(event)}>
+              <label>
+                {language === "pl" ? "NOWE HASŁO" : "NEW PASSWORD"}
+                <input
+                  autoComplete="new-password"
+                  minLength={8}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                  type="password"
+                  value={password}
+                />
+              </label>
+              <label>
+                {language === "pl" ? "POWTÓRZ HASŁO" : "CONFIRM PASSWORD"}
+                <input
+                  autoComplete="new-password"
+                  minLength={8}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  required
+                  type="password"
+                  value={confirmPassword}
+                />
+              </label>
+              <p className="auth-message" aria-live="polite" role="status">{message}</p>
+              <button className="primary-button auth-submit" disabled={submitting} type="submit">
+                {submitting
+                  ? language === "pl" ? "ZAPISYWANIE..." : "SAVING..."
+                  : language === "pl" ? "ZMIEŃ HASŁO" : "RESET PASSWORD"}
+              </button>
+            </form>
+          </>
         )}
       </section>
     </main>
@@ -489,13 +838,17 @@ const ROOM_TRANSITIONS: Partial<Record<LevelId, Partial<Record<LevelId, string>>
 };
 
 function RoomMapModal({
+  isAdmin,
   currentRoomNumber,
   onClose,
+  onSelectRoom,
 }: {
+  isAdmin: boolean;
   currentRoomNumber?: number;
   onClose: () => void;
+  onSelectRoom?: (levelId: LevelId) => void;
 }) {
-  const { text: localizeAttribute } = useTranslation();
+  const { language, text: localizeAttribute } = useTranslation();
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -533,6 +886,13 @@ function RoomMapModal({
         </div>
         <p className="room-map-description">
           <LocalizedText translationKey="copy.e04387ba" fallback={"Mapa pokazuje tylko pokoje opisane w koncepcji. Wyróżnione pozycje są grywalnymi misjami; skróty synaptyczne łączą odległe strefy. "} /></p>
+        {isAdmin && (
+          <p className="room-map-description">
+            {language === "en"
+              ? "Administrator mode: select a room to open it without campaign locks."
+              : "Tryb administratora: kliknij pokój, aby otworzyć go bez blokad kampanii."}
+          </p>
+        )}
         <div className="room-map-legend">
           <span><i className="room-map-legend-active" /> <LocalizedText translationKey="copy.a4e5eb5c" fallback={"MISJA W KAMPANII"} /></span>
           {currentRoomNumber && (
@@ -548,6 +908,7 @@ function RoomMapModal({
               </h3>
               <div className="room-map-grid">
                 {sector.rooms.map((room) => {
+                  const levelId = room.levelId;
                   const isActive = room.levelId
                     ? isLevelEnabled(room.levelId)
                     : false;
@@ -561,26 +922,52 @@ function RoomMapModal({
                     .join(" ");
 
                   return (
-                    <div
-                      aria-current={isCurrent ? "location" : undefined}
-                      aria-label={[
-                        `Pokój ${room.label}`,
-                        room.title,
-                        isActive ? "misja w kampanii" : "",
-                        isCurrent ? "twoja lokalizacja" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" — ")}
-                      className={classes}
-                      key={localizeAttribute(translationKeyFor(room.label), room.label)}
-                      title={localizeAttribute("copy.8e3d6307", "Pokój {number} — {title}", {
-                        number: room.label,
-                        title: localizeAttribute(translationKeyFor(room.title), room.title),
-                      })}
-                    >
-                      <span><LocalizedText fallback={room.label} /></span>
-                      <small><LocalizedText fallback={room.title} /></small>
-                    </div>
+                    isAdmin && levelId ? (
+                      <button
+                        aria-current={isCurrent ? "location" : undefined}
+                        aria-label={[
+                          `Pokój ${room.label}`,
+                          room.title,
+                          isActive ? "misja w kampanii" : "",
+                          isCurrent ? "twoja lokalizacja" : "",
+                          language === "en" ? "click to open room" : "kliknij, aby otworzyć pokój",
+                        ]
+                          .filter(Boolean)
+                          .join(" — ")}
+                        className={classes}
+                        key={localizeAttribute(translationKeyFor(room.label), room.label)}
+                        onClick={() => onSelectRoom?.(levelId)}
+                        title={localizeAttribute("copy.8e3d6307", "Pokój {number} — {title}", {
+                          number: room.label,
+                          title: localizeAttribute(translationKeyFor(room.title), room.title),
+                        })}
+                        type="button"
+                      >
+                        <span><LocalizedText fallback={room.label} /></span>
+                        <small><LocalizedText fallback={room.title} /></small>
+                      </button>
+                    ) : (
+                      <div
+                        aria-current={isCurrent ? "location" : undefined}
+                        aria-label={[
+                          `Pokój ${room.label}`,
+                          room.title,
+                          isActive ? "misja w kampanii" : "",
+                          isCurrent ? "twoja lokalizacja" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" — ")}
+                        className={classes}
+                        key={localizeAttribute(translationKeyFor(room.label), room.label)}
+                        title={localizeAttribute("copy.8e3d6307", "Pokój {number} — {title}", {
+                          number: room.label,
+                          title: localizeAttribute(translationKeyFor(room.title), room.title),
+                        })}
+                      >
+                        <span><LocalizedText fallback={room.label} /></span>
+                        <small><LocalizedText fallback={room.title} /></small>
+                      </div>
+                    )
                   );
                 })}
               </div>
@@ -750,7 +1137,14 @@ function AppContent() {
   const [screen, setScreen] = useState<Screen>("lobby");
   const [authChecked, setAuthChecked] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userIsAdmin, setUserIsAdmin] = useState(false);
   const [authNotice, setAuthNotice] = useState("");
+  const [passwordResetLink, setPasswordResetLink] = useState<PasswordResetLink | null>(() => {
+    const parameters = new URLSearchParams(window.location.hash.slice(1));
+    const email = parameters.get("resetEmail");
+    const code = parameters.get("resetCode");
+    return email && code ? { email, code } : null;
+  });
   const [completedLevelId, setCompletedLevelId] = useState<LevelId>("room01");
   const [ethicalChoice, setEthicalChoice] = useState<"privacy" | "research" | null>(null);
   const [finalDecision, setFinalDecision] = useState<"privacy" | "research" | null>(null);
@@ -758,22 +1152,89 @@ function AppContent() {
   const [roomMapOpen, setRoomMapOpen] = useState(false);
   const [backendWarming, setBackendWarming] = useState(false);
   const [backendMessage, setBackendMessage] = useState("");
+  const [storyCatalog, setStoryCatalog] = useState<StoryCatalogItem[] | null>(null);
+  const [storyCatalogError, setStoryCatalogError] = useState("");
+  const [selectedStoryId, setSelectedStoryId] = useState("");
+  const [storyProgress, setStoryProgress] = useState<StoryProgress | null>(null);
 
-  const firstEnabledLevel = ENABLED_LEVELS[0];
-  const nextEnabledLevel = getNextEnabledLevel(completedLevelId);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchStories(language, controller.signal)
+      .then((stories) => {
+        setStoryCatalog(stories);
+        setStoryCatalogError("");
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setStoryCatalog(null);
+        setStoryCatalogError(
+          error instanceof Error
+            ? error.message
+            : "Nie udało się pobrać scenariuszy.",
+        );
+      });
+
+    return () => controller.abort();
+  }, [language]);
+
+  const selectedStory =
+    storyCatalog?.find((story) => story.id === selectedStoryId) ?? storyCatalog?.[0];
+  const storyLevels: StoryLevel[] = (selectedStory?.rooms ?? [])
+    .map((room) => {
+      const definition = LEVELS.find((level) => level.id === room.key);
+      if (!definition || !definition.enabled) return undefined;
+      const title = room.contents.find((content) => content.contentKey === "title")?.text;
+      const description = room.contents.find(
+        (content) => content.contentKey === "description",
+      )?.text;
+      return {
+        ...definition,
+        number: room.order,
+        order: room.order,
+        roomNumber: room.roomNumber,
+        title: title ?? definition.title,
+        description: description ?? definition.description,
+      };
+    })
+    .filter((level): level is StoryLevel => level !== undefined)
+    .sort((left, right) => left.order - right.order);
+  const hasUnsupportedRooms = (selectedStory?.rooms ?? []).some(
+    (room) => !LEVELS.some((level) => level.id === room.key),
+  );
+  const activeLevelCount = storyLevels.length;
+  const firstEnabledLevel = storyLevels[0];
+  const completedLevelIndex = storyLevels.findIndex(
+    (level) => level.id === completedLevelId,
+  );
+  const nextEnabledLevel =
+    completedLevelIndex >= 0 ? storyLevels[completedLevelIndex + 1] : undefined;
+  const progressRoom = storyProgress?.currentStoryRoomId
+    ? selectedStory?.rooms.find(
+        (room) => room.id === storyProgress.currentStoryRoomId,
+      )
+    : undefined;
+  const progressLevel = storyLevels.find((level) => level.id === progressRoom?.key);
+  const resumeLevel = progressLevel
+    ? storyProgress?.completedAt
+      ? progressLevel
+      : storyLevels.find((level) => level.order > progressLevel.order) ?? progressLevel
+    : firstEnabledLevel;
   const activeMissionLabel =
-    ACTIVE_LEVEL_COUNT === 1
+    activeLevelCount === 1
       ? "aktywna misja"
-      : ACTIVE_LEVEL_COUNT >= 2 && ACTIVE_LEVEL_COUNT <= 4
+      : activeLevelCount >= 2 && activeLevelCount <= 4
         ? "aktywne misje"
         : "aktywnych misji";
-  const activeLevelDescription = activeLevelPhrase(ACTIVE_LEVEL_COUNT);
+  const activeLevelDescription = activeLevelPhrase(activeLevelCount);
   const level2 = useRoom34({
     active: screen === "level2",
     onBegin: () => setScreen("level2"),
     onComplete: () => {
-      setCompletedLevelId("room34");
-      setScreen("success");
+      void continueAfterLevel(
+        "room34",
+        "clock-reconstruction-complete",
+        "success",
+      );
     },
     onFailure: () => setScreen("failed"),
   });
@@ -808,92 +1269,20 @@ function AppContent() {
     checkClock,
     answerTime,
   } = level2;
-  const currentRoomNumber =
+  const currentLevelId =
     screen === "level1"
-      ? 1
-      : screen === "room05"
-        ? 5
-        : screen === "room11"
-          ? 11
-            : screen === "room12"
-              ? 12
-              : screen === "room17"
-                ? 17
-                : screen === "room22"
-                  ? 22
-                    : screen === "room23"
-                      ? 23
-                      : screen === "room27"
-                        ? 27
-                        : screen === "room33"
-                          ? 33
-                          : screen === "room40"
-                            ? 40
-                            : screen === "room44"
-                              ? 44
-                              : screen === "room45"
-                                ? 45
-                                : screen === "room50"
-                                  ? 50
-                                  : screen === "room55"
-                                    ? 55
-                                    : screen === "room61"
-                                      ? 61
-                                      : screen === "room66"
-                                        ? 66
-                                        : screen === "room76"
-                                          ? 76
-                                          : screen === "room72"
-                                            ? 72
-                                            : screen === "room77"
-                                              ? 77
-                                              : screen === "room67"
-                                                ? 67
-                                                : screen === "room78"
-                                                  ? 78
-                                                  : screen === "room83"
-                                                    ? 83
-                                                    : screen === "room88"
-                                                      ? 88
-                                                      : screen === "room89"
-                                                        ? 89
-                                                        : screen === "room99"
-                                                          ? 99
-        : screen === "level2intro" || screen === "level2"
-        ? 34
+      ? "room01"
+      : screen === "level2intro" || screen === "level2"
+        ? "room34"
         : screen === "level3intro"
-          ? 56
-          : screen === "transition" || screen === "success" || screen === "failed"
-            ? ({
-                room01: 1,
-                room05: 5,
-                room11: 11,
-                room12: 12,
-                room17: 17,
-                room22: 22,
-                room23: 23,
-                room27: 27,
-                room33: 33,
-                room34: 34,
-                room40: 40,
-                room44: 44,
-                room45: 45,
-                room50: 50,
-                room55: 55,
-                room56: 56,
-                room61: 61,
-                room66: 66,
-                room76: 76,
-                room72: 72,
-                room77: 77,
-                room67: 67,
-                room78: 78,
-                room83: 83,
-                room88: 88,
-                room89: 89,
-                room99: 99,
-              } as const)[completedLevelId]
-            : undefined;
+          ? "room56"
+          : LEVELS.find((level) => level.id === screen)?.id ??
+            (screen === "transition" || screen === "success" || screen === "failed"
+              ? completedLevelId
+              : undefined);
+  const currentRoomNumber = storyLevels.find(
+    (level) => level.id === currentLevelId,
+  )?.roomNumber;
 
     useEffect(() => {
       let active = true;
@@ -907,11 +1296,14 @@ function AppContent() {
           if (!response.ok) {
             throw new Error(await getApiError(response));
           }
-          setUserEmail(await getAuthenticatedEmail(response));
+          const user = await getAuthenticatedUser(response);
+          setUserEmail(user.displayName);
+          setUserIsAdmin(user.isAdmin);
         })
         .catch((error: unknown) => {
           if (active) {
             setUserEmail(null);
+            setUserIsAdmin(false);
             setAuthNotice(error instanceof Error
               ? error.message
               : "Nie można połączyć się z serwerem logowania. Sprawdź, czy aplikacja działa.");
@@ -938,7 +1330,7 @@ function AppContent() {
         break;
 
       case "intro":
-        playPolishAudio(archiveIntroNarrationFiles(ACTIVE_LEVEL_COUNT));
+        playPolishAudio(archiveIntroNarrationFiles(activeLevelCount));
         break;
 
       case "level1":
@@ -1056,7 +1448,7 @@ function AppContent() {
     return () => {
       stopPolishAudio();
     };
-  }, [screen, voiceEnabled, activeLevelDescription, authChecked, userEmail]);
+  }, [screen, voiceEnabled, activeLevelDescription, activeLevelCount, authChecked, userEmail]);
 
   async function warmBackendAndStart() {
     if (backendWarming) return;
@@ -1122,22 +1514,27 @@ function AppContent() {
   }
 
   function startLevel1() {
-    if (!isLevelEnabled("room01")) return;
+    if (!isLevelEnabled("room01") || !storyLevels.some((level) => level.id === "room01")) return;
     setScreen("level1");
   }
 
-  function startLevelById(levelId: LevelId) {
-    if (!isLevelEnabled(levelId)) return;
+  function startLevelById(levelId: LevelId, adminMapAccess = false) {
+    const canSkipCampaignLocks = adminMapAccess && userIsAdmin;
+    if (
+      !LEVELS.some((level) => level.id === levelId) ||
+      (!canSkipCampaignLocks &&
+        (!isLevelEnabled(levelId) || !storyLevels.some((level) => level.id === levelId)))
+    ) return;
 
     switch (levelId) {
       case "room01":
         void warmBackendAndStart();
         break;
       case "room34":
-        startLevel2();
+        startLevel2(canSkipCampaignLocks);
         break;
       case "room56":
-        startLevel3();
+        startLevel3(canSkipCampaignLocks);
         break;
       case "room05":
         setScreen("room05");
@@ -1215,12 +1612,12 @@ function AppContent() {
   }
 
   function startFirstEnabledLevel() {
-    if (!firstEnabledLevel) return;
-    if (firstEnabledLevel.id === "room01") {
+    if (!resumeLevel) return;
+    if (resumeLevel.id === "room01") {
       void warmBackendAndStart();
       return;
     }
-    startLevelById(firstEnabledLevel.id);
+    startLevelById(resumeLevel.id);
   }
 
   function startNextEnabledLevel() {
@@ -1228,25 +1625,102 @@ function AppContent() {
     startLevelById(nextEnabledLevel.id);
   }
 
-  function continueAfterLevel(levelId: LevelId) {
-    setCompletedLevelId(levelId);
-    setScreen("transition");
+  async function continueAfterLevel(
+    levelId: LevelId,
+    proof?: string,
+    destination: Screen = "transition",
+  ) {
+    if (!selectedStoryId) {
+      setAuthNotice("Nie można zapisać postępu bez wybranego scenariusza.");
+      return;
+    }
+
+    setAuthNotice("");
+    try {
+      const puzzleInstanceId = `${selectedStoryId}:${levelId}:puzzle01`;
+      if (levelId !== "room01") {
+        if (proof === undefined) {
+          throw new Error("Brak potwierdzenia rozwiązania zagadki.");
+        }
+        const valid = await submitPuzzleAnswer(puzzleInstanceId, proof);
+        if (!valid) {
+          setAuthNotice("Serwer nie potwierdził rozwiązania. Spróbuj ponownie.");
+          return;
+        }
+      }
+
+      const progress = await fetchStoryProgress(
+        selectedStoryId,
+        new AbortController().signal,
+      );
+      if (!progress.completedPuzzleInstanceIds.includes(puzzleInstanceId)) {
+        setAuthNotice("Serwer nie zapisał postępu tej zagadki.");
+        return;
+      }
+
+      setStoryProgress(progress);
+      setCompletedLevelId(levelId);
+      setScreen(destination);
+    } catch (error) {
+      setAuthNotice(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się potwierdzić ani zapisać postępu zagadki.",
+      );
+    }
   }
 
   function continueAfterEthicalChoice(choice: "privacy" | "research") {
     setEthicalChoice(choice);
-    continueAfterLevel("room66");
+    void continueAfterLevel("room66", choice);
   }
 
-  function startLevel2() {
-    if (!isLevelEnabled("room34")) return;
+  function startLevel2(adminMapAccess = false) {
+    if (
+      !adminMapAccess &&
+      (!isLevelEnabled("room34") || !storyLevels.some((level) => level.id === "room34"))
+    ) return;
     level2.reset();
     setScreen("level2intro");
   }
 
-  function startLevel3() {
-    if (!isLevelEnabled("room56")) return;
+  function startLevel3(adminMapAccess = false) {
+    if (
+      !adminMapAccess &&
+      (!isLevelEnabled("room56") || !storyLevels.some((level) => level.id === "room56"))
+    ) return;
     setScreen("level3intro");
+  }
+
+  async function chooseStory(story: StoryCatalogItem) {
+    const firstRoom = [...story.rooms].sort((left, right) => left.order - right.order)[0];
+    const firstLevel = LEVELS.find((level) => level.id === firstRoom?.key);
+    if (!firstRoom || !firstLevel || !firstLevel.enabled) return;
+
+    setAuthNotice("");
+    try {
+      const progress = await fetchStoryProgress(
+        story.id,
+        new AbortController().signal,
+      );
+      const currentRoom = story.rooms.find(
+        (room) => room.id === progress.currentStoryRoomId,
+      );
+      const currentLevel = LEVELS.find((level) => level.id === currentRoom?.key);
+      setStoryProgress(progress);
+      setSelectedStoryId(story.id);
+      setCompletedLevelId(currentLevel?.id ?? firstLevel.id);
+      setEthicalChoice(null);
+      setFinalDecision(null);
+      setRoomMapOpen(false);
+      setScreen("intro");
+    } catch (error) {
+      setAuthNotice(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się pobrać postępu scenariusza.",
+      );
+    }
   }
 
   async function logout() {
@@ -1260,12 +1734,27 @@ function AppContent() {
         return;
       }
       setUserEmail(null);
+      setUserIsAdmin(false);
       setAuthNotice("");
       setRoomMapOpen(false);
       setScreen("lobby");
     } catch {
       setAuthNotice(localizeAttribute("copy.f516ed10", "Nie udało się wylogować. Sprawdź połączenie z serwerem."));
     }
+  }
+
+  if (passwordResetLink) {
+    return (
+      <PasswordResetScreen
+        resetLink={passwordResetLink}
+        onComplete={() => {
+          setPasswordResetLink(null);
+          setUserEmail(null);
+          setUserIsAdmin(false);
+          setAuthNotice("");
+        }}
+      />
+    );
   }
 
   if (!authChecked) {
@@ -1281,8 +1770,9 @@ function AppContent() {
     return (
       <LoginScreen
         initialError={authNotice}
-        onAuthenticated={(email) => {
-          setUserEmail(email);
+        onAuthenticated={(user) => {
+          setUserEmail(user.displayName);
+          setUserIsAdmin(user.isAdmin);
           setAuthNotice("");
           setScreen("lobby");
         }}
@@ -1300,9 +1790,7 @@ function AppContent() {
           <span><LocalizedText translationKey="copy.a1be99c2" fallback={"LABORATORIUM "} /><span className="accent"><LocalizedText translationKey="copy.39dcb3b2" fallback={"PROFESORA"} /></span></span>
         </div>
         <div className="header-controls">
-          <div className="system-status">
-            <span className="status-dot" />
-            <LocalizedText translationKey="copy.f3f911dd" fallback={"SYSTEM ONLINE "} /></div>
+          <BackendConnectionStatus />
           <button
             aria-label={language === "pl" ? "Switch language to English" : "Zmień język na polski"}
             className="language-toggle"
@@ -1322,6 +1810,18 @@ function AppContent() {
               type="button"
             >
               <LocalizedText translationKey="copy.2d6aef44" fallback={"WYBÓR GRY "} /></button>
+          )}
+          {userIsAdmin && (
+            <button
+              className="room-map-toggle"
+              onClick={() => {
+                setRoomMapOpen(false);
+                setScreen("admin");
+              }}
+              type="button"
+            >
+              {language === "en" ? "ADMIN PANEL" : "PANEL ADMINA"}
+            </button>
           )}
           {screen !== "lobby" && (
             <button
@@ -1348,14 +1848,24 @@ function AppContent() {
 
       {roomMapOpen && (
         <RoomMapModal
+          isAdmin={userIsAdmin}
           currentRoomNumber={currentRoomNumber}
           onClose={() => setRoomMapOpen(false)}
+          onSelectRoom={userIsAdmin
+            ? (levelId) => {
+                setRoomMapOpen(false);
+                startLevelById(levelId, true);
+              }
+            : undefined}
         />
       )}
 
-      {(authNotice || translationError) && (
+      {(authNotice || translationError || storyCatalogError || hasUnsupportedRooms) && (
         <p className="auth-global-message" role="alert">
-          {authNotice || `Nie udało się pobrać tekstów z bazy: ${translationError}`}
+          {authNotice ||
+            (translationError && `Nie udało się pobrać tekstów z bazy: ${translationError}`) ||
+            storyCatalogError ||
+            "Scenariusz zawiera pokój, którego mechaniki nie obsługuje ta wersja aplikacji."}
         </p>
       )}
 
@@ -1368,36 +1878,69 @@ function AppContent() {
           </h1>
           <p className="lead">
             <LocalizedText translationKey="copy.cbaecf20" fallback={"Witaj, "} />{userEmail}<LocalizedText translationKey="copy.a923e98b" fallback={". Wybierz archiwum i rozpocznij swoją wyprawę. "} /></p>
-          <article className="escape-room-card">
-            <div className="escape-room-art" aria-hidden="true">
-              <span><LocalizedText translationKey="copy.ac0d6404" fallback={"Ω"} /></span>
-              <i />
-            </div>
-            <div className="escape-room-copy">
-              <div className="eyebrow"><LocalizedText translationKey="copy.6dd77941" fallback={"DOSTĘPNE ESCAPE ROOMY · 01"} /></div>
-              <h2><LocalizedText translationKey="copy.2963a16c" fallback={"Labirynt 99 Pokoi"} /></h2>
-              <p>
-                <LocalizedText translationKey="copy.4dc6b83f" fallback={"Wejdź do umysłu profesora Henry'ego Armitage'a. Odzyskuj wspomnienia, rozwiązuj zagadki i dotrzyj do Punktu Omega. "} /></p>
-              <div className="escape-room-meta">
-                <span>{ACTIVE_LEVEL_COUNT} <LocalizedText translationKey="copy.d77a511f" fallback={"AKTYWNYCH MISJI"} /></span>
-                <span><LocalizedText translationKey="copy.b8cbf324" fallback={"JĄDRO ŚWIADOMOŚCI"} /></span>
-              </div>
-              <button
-                className="primary-button"
-                onClick={() => setScreen("intro")}
-                type="button"
-              >
-                <LocalizedText translationKey="copy.66e56804" fallback={"WYBIERZ LABIRYNT "} /><span><LocalizedText translationKey="copy.973c7cf5" fallback={"→"} /></span>
-              </button>
-            </div>
-          </article>
+          <div className="escape-room-list">
+            {storyCatalog?.map((story) => {
+              const supportedRoomCount = story.rooms.filter((room) =>
+                LEVELS.some((level) => level.id === room.key && level.enabled),
+              ).length;
+              const unsupported = supportedRoomCount !== story.rooms.length;
+
+              return (
+                <article className="escape-room-card" key={story.id}>
+                  <div className="escape-room-art" aria-hidden="true">
+                    <span><LocalizedText translationKey="copy.ac0d6404" fallback={"Ω"} /></span>
+                    <i />
+                  </div>
+                  <div className="escape-room-copy">
+                    <div className="eyebrow">
+                      {localizeAttribute(
+                        "story.availableCount",
+                        language === "en"
+                          ? "AVAILABLE STORIES · {count}"
+                          : "DOSTĘPNE SCENARIUSZE · {count}",
+                        { count: storyCatalog.length },
+                      )}
+
+                    </div>
+                    <h2>{story.name}</h2>
+                    <p>{story.description}</p>
+                    <div className="escape-room-meta">
+                      <span>{supportedRoomCount} <LocalizedText translationKey="copy.d77a511f" fallback={"AKTYWNYCH MISJI"} /></span>
+                      <span><LocalizedText translationKey="copy.b8cbf324" fallback={"JĄDRO ŚWIADOMOŚCI"} /></span>
+                    </div>
+                    <button
+                      className="primary-button"
+                      disabled={unsupported || supportedRoomCount === 0}
+                      onClick={() => chooseStory(story)}
+                      type="button"
+                    >
+                      <LocalizedText translationKey="copy.66e56804" fallback={"WYBIERZ LABIRYNT "} /><span><LocalizedText translationKey="copy.973c7cf5" fallback={"→"} /></span>
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+            {storyCatalog === null && !storyCatalogError && (
+              <p className="auth-loading" role="status">ŁADOWANIE SCENARIUSZY…</p>
+            )}
+            {storyCatalog?.length === 0 && (
+              <p className="feedback" role="status">Brak opublikowanych scenariuszy.</p>
+            )}
+          </div>
         </section>
+      )}
+
+      {screen === "admin" && userIsAdmin && (
+        <AdminPanel
+          language={language}
+          onBack={() => setScreen("lobby")}
+        />
       )}
 
       {screen === "intro" && (
         <section className="screen intro-screen">
           <div className="eyebrow">
-            <LocalizedText translationKey="copy.cd80da87" fallback={"SYSTEM ZAGADEK // 001 / "} />{ACTIVE_LEVEL_COUNT}{" "}
+            <LocalizedText translationKey="copy.cd80da87" fallback={"SYSTEM ZAGADEK // 001 / "} />{activeLevelCount}{" "}
             {activeMissionLabel.toLocaleUpperCase("pl-PL")}
           </div>
           <h1>
@@ -1410,7 +1953,7 @@ function AppContent() {
           <div className="intro-story">
             <p>
               <strong>
-                <LocalizedText translationKey="copy.3affcfd5" fallback={"ARCHIWUM "} />{ACTIVE_LEVEL_COUNT} <LocalizedText translationKey="copy.8492a839" fallback={"// WIADOMOŚĆ ODEBRANA "} /></strong>
+                <LocalizedText translationKey="copy.3affcfd5" fallback={"ARCHIWUM "} />{activeLevelCount} <LocalizedText translationKey="copy.8492a839" fallback={"// WIADOMOŚĆ ODEBRANA "} /></strong>
             </p>
             <p>
               <LocalizedText translationKey="copy.86a5a793" fallback={"Witaj, naprawczy impulsie. Jesteś wewnątrz Labiryntu 99 Pokoi — archiwum pamięci stworzonego przez profesora Henry'ego Armitage'a. Zachowane zapisy są niekompletne, a połączenia między nimi zaczynają zanikać. "} /></p>
@@ -1427,7 +1970,7 @@ function AppContent() {
 
           <div className="active-level-counter" aria-live="polite">
             <span><LocalizedText translationKey="copy.dde775c1" fallback={"AKTYWNE POZIOMY"} /></span>
-            <strong>{ACTIVE_LEVEL_COUNT}</strong>
+            <strong>{activeLevelCount}</strong>
             <span><LocalizedText translationKey="copy.801abc60" fallback={"W REJESTRZE KAMPANII"} /></span>
           </div>
 
@@ -1461,7 +2004,7 @@ function AppContent() {
             type="button"
             disabled={!voiceEnabled}
             onClick={() =>
-              playPolishAudio(archiveIntroNarrationFiles(ACTIVE_LEVEL_COUNT))
+              playPolishAudio(archiveIntroNarrationFiles(activeLevelCount))
             }
           >
             <LocalizedText translationKey="copy.c3cb90fa" fallback={"▶ ODTWÓRZ LEKTORA "} /></button>
@@ -1485,105 +2028,105 @@ function AppContent() {
       )}
 
       {screen === "room05" && (
-        <Room05 onComplete={() => continueAfterLevel("room05")} />
+        <Room05         onComplete={(proof) => void continueAfterLevel("room05", proof)} />
       )}
 
       {screen === "room11" && (
-        <Room11 onComplete={() => continueAfterLevel("room11")} />
+        <Room11         onComplete={(proof) => void continueAfterLevel("room11", proof)} />
       )}
 
       {screen === "room12" && (
-        <Room12 onComplete={() => continueAfterLevel("room12")} />
+        <Room12         onComplete={(proof) => void continueAfterLevel("room12", proof)} />
       )}
 
       {screen === "room17" && (
         <Room17
-          onComplete={() => continueAfterLevel("room17")}
+          onComplete={(proof) => void continueAfterLevel("room17", proof)}
           voiceEnabled={voiceEnabled}
         />
       )}
 
       {screen === "room22" && (
-        <Room22 onComplete={() => continueAfterLevel("room22")} />
+        <Room22         onComplete={(proof) => void continueAfterLevel("room22", proof)} />
       )}
 
       {screen === "room23" && (
-        <Room23 onComplete={() => continueAfterLevel("room23")} />
+        <Room23         onComplete={(proof) => void continueAfterLevel("room23", proof)} />
       )}
 
       {screen === "room27" && (
-        <Room27 onComplete={() => continueAfterLevel("room27")} />
+        <Room27         onComplete={(proof) => void continueAfterLevel("room27", proof)} />
       )}
 
       {screen === "room33" && (
-        <Room33 onComplete={() => continueAfterLevel("room33")} />
+        <Room33         onComplete={(proof) => void continueAfterLevel("room33", proof)} />
       )}
 
       {screen === "room40" && (
-        <Room40 onComplete={() => continueAfterLevel("room40")} />
+        <Room40         onComplete={(proof) => void continueAfterLevel("room40", proof)} />
       )}
 
       {screen === "room44" && (
-        <Room44 onComplete={() => continueAfterLevel("room44")} />
+        <Room44         onComplete={(proof) => void continueAfterLevel("room44", proof)} />
       )}
 
       {screen === "room45" && (
-        <Room45 onComplete={() => continueAfterLevel("room45")} />
+        <Room45         onComplete={(proof) => void continueAfterLevel("room45", proof)} />
       )}
 
       {screen === "room50" && (
-        <Room50 onComplete={() => continueAfterLevel("room50")} />
+        <Room50         onComplete={(proof) => void continueAfterLevel("room50", proof)} />
       )}
 
       {screen === "room55" && (
-        <Room55 onComplete={() => continueAfterLevel("room55")} />
+        <Room55         onComplete={(proof) => void continueAfterLevel("room55", proof)} />
       )}
 
       {screen === "room61" && (
-        <Room61 onComplete={() => continueAfterLevel("room61")} />
+        <Room61         onComplete={(proof) => void continueAfterLevel("room61", proof)} />
       )}
 
       {screen === "room66" && (
-        <Room66 onComplete={continueAfterEthicalChoice} />
+        <Room66         onComplete={(choice) => continueAfterEthicalChoice(choice)} />
       )}
 
       {screen === "room76" && (
-        <Room76 onComplete={() => continueAfterLevel("room76")} />
+        <Room76         onComplete={(proof) => void continueAfterLevel("room76", proof)} />
       )}
 
       {screen === "room72" && (
-        <Room72 onComplete={() => continueAfterLevel("room72")} />
+        <Room72         onComplete={(proof) => void continueAfterLevel("room72", proof)} />
       )}
 
       {screen === "room77" && (
-        <Room77 onComplete={() => continueAfterLevel("room77")} />
+        <Room77         onComplete={(proof) => void continueAfterLevel("room77", proof)} />
       )}
 
       {screen === "room67" && (
-        <Room67 onComplete={() => continueAfterLevel("room67")} />
+        <Room67         onComplete={(proof) => void continueAfterLevel("room67", proof)} />
       )}
 
       {screen === "room78" && (
-        <Room78 onComplete={() => continueAfterLevel("room78")} />
+        <Room78         onComplete={(proof) => void continueAfterLevel("room78", proof)} />
       )}
 
       {screen === "room83" && (
-        <Room83 onComplete={() => continueAfterLevel("room83")} />
+        <Room83         onComplete={(proof) => void continueAfterLevel("room83", proof)} />
       )}
 
       {screen === "room88" && (
-        <Room88 onComplete={() => continueAfterLevel("room88")} />
+        <Room88         onComplete={(proof) => void continueAfterLevel("room88", proof)} />
       )}
 
       {screen === "room89" && (
-        <Room89 onComplete={() => continueAfterLevel("room89")} />
+        <Room89         onComplete={(proof) => void continueAfterLevel("room89", proof)} />
       )}
 
       {screen === "room99" && (
         <Room99
           onComplete={(choice) => {
             setFinalDecision(choice);
-            continueAfterLevel("room99");
+            void continueAfterLevel("room99", choice);
           }}
         />
       )}
@@ -1592,7 +2135,7 @@ function AppContent() {
         <section className="screen story-screen">
           <div className="success-icon"><LocalizedText translationKey="copy.163a1ee2" fallback={"✓"} /></div>
           <div className="eyebrow">
-            <LocalizedText translationKey="copy.b843a487" fallback={"MISJA "} />{String(LEVELS.find((level) => level.id === completedLevelId)?.number ?? 0).padStart(2, "0")} <LocalizedText translationKey="copy.ed49ce86" fallback={"// ZAKOŃCZONA "} /></div>
+            <LocalizedText translationKey="copy.b843a487" fallback={"MISJA "} />{String(storyLevels.find((level) => level.id === completedLevelId)?.number ?? 0).padStart(2, "0")} <LocalizedText translationKey="copy.ed49ce86" fallback={"// ZAKOŃCZONA "} /></div>
           <h1>
             {nextEnabledLevel ? <LocalizedText translationKey="copy.d2ea6b3b" fallback={"KOLEJNE DRZWI"} /> : <LocalizedText translationKey="copy.a350ce15" fallback={"KAMPANIA"} />}
             <br />
@@ -1649,7 +2192,7 @@ function AppContent() {
               className="text-button"
               onClick={() => startLevelById(completedLevelId)}
             >
-              <LocalizedText translationKey="copy.600e19f5" fallback={"↻ Powtórz Level "} />{LEVELS.find((level) => level.id === completedLevelId)?.number}
+              <LocalizedText translationKey="copy.600e19f5" fallback={"↻ Powtórz Level "} />{storyLevels.find((level) => level.id === completedLevelId)?.number}
             </button>
           )}
         </section>
@@ -2028,7 +2571,7 @@ function AppContent() {
 
       {screen === "level3intro" && (
         <Room56
-          onComplete={() => continueAfterLevel("room56")}
+          onComplete={(proof) => void continueAfterLevel("room56", proof)}
           voiceEnabled={voiceEnabled}
         />
       )}
@@ -2090,7 +2633,7 @@ function AppContent() {
           )}
           <button className="text-button" onClick={() => setScreen("intro")}>
             <LocalizedText translationKey="copy.0e3cfa96" fallback={"Wróć do menu "} /></button>
-          <button className="text-button" onClick={startLevel2}>
+          <button className="text-button" onClick={() => startLevel2()}>
             <LocalizedText translationKey="copy.49637383" fallback={"↻ Zagraj w Level 2 ponownie "} /></button>
         </section>
       )}
@@ -2105,7 +2648,7 @@ function AppContent() {
           </h1>
           <p className="lead">
             <LocalizedText translationKey="copy.9b1244a3" fallback={"Rekonstrukcja czasu nie została ukończona. Zachowane ślady nadal są dostępne — możesz spróbować ponownie. "} /></p>
-          <button className="primary-button" onClick={startLevel2}>
+          <button className="primary-button" onClick={() => startLevel2()}>
             <LocalizedText translationKey="copy.be71f905" fallback={"SPRÓBUJ PONOWNIE "} /><span><LocalizedText translationKey="copy.be3cba5a" fallback={"↻"} /></span>
           </button>
           <button className="text-button" onClick={() => setScreen("transition")}>

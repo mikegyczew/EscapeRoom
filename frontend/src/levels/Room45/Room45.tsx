@@ -6,7 +6,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room45Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const CLOCK_POINTS = [
@@ -43,7 +43,10 @@ export default function Room45({ onComplete }: Room45Props) {
 
     setComplete(true);
     setFeedback(localizeAttribute("copy.9d996a8d", "Główne punkty tarczy ustawione. Mechanizm rysunku został odtworzony."));
-    window.setTimeout(onComplete, 700);
+    window.setTimeout(
+      () => onComplete(JSON.stringify(CLOCK_POINTS.map((point) => points[point.id]))),
+      700,
+    );
   }
 
   if (!started) {

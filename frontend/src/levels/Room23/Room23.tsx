@@ -4,7 +4,7 @@ import { LocalizedText } from "../../shared/localized-text";
 
 
 type Room23Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const BREATH_STEPS = [4, 2, 6] as const;
@@ -33,7 +33,7 @@ export default function Room23({ onComplete }: Room23Props) {
 
     setComplete(true);
     setFeedback(text("room23.feedback.complete", "Rytm odzyskany. Zegar cichnie, a przejście się otwiera."));
-    window.setTimeout(onComplete, 700);
+    window.setTimeout(() => onComplete(JSON.stringify(values)), 700);
   }
 
   if (!started) {

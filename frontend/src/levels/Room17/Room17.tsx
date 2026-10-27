@@ -5,7 +5,7 @@ import { LocalizedText } from "../../shared/localized-text";
 
 
 type Room17Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
   voiceEnabled: boolean;
 };
 
@@ -37,7 +37,7 @@ export default function Room17({ onComplete, voiceEnabled }: Room17Props) {
     }
     if (answer === "0830") {
       setFeedback(text("room17.complete", "Oryginalny wykład odzyskany. Chór ucichł, a zapis pozostał."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(() => onComplete(answer), 700);
       return;
     }
     setFeedback(text("room17.incorrect", "To nie sygnatura właściwego nagrania. Porównaj wszystkie głosy i wróć do notatki."));

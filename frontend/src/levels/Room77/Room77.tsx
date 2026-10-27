@@ -5,7 +5,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room77Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const FRAGMENTS = [
@@ -40,7 +40,7 @@ export default function Room77({ onComplete }: Room77Props) {
     if (nextSelection.length === SENTENCE_ORDER.length) {
       setComplete(true);
       setFeedback(localizeAttribute("copy.61389214", "Ostatnie zdanie zostało zachowane. Archiwum przechowuje myśl, nie ocenę."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(() => onComplete(JSON.stringify(nextSelection)), 700);
       return;
     }
 

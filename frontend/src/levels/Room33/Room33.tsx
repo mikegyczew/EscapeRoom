@@ -3,10 +3,8 @@ import { LocalizedText } from "../../shared/localized-text";
 import { translationKeyFor } from "../../shared/translation-key";
 import { useTranslation } from "../../shared/use-translation";
 
-
-
 type Room33Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const MAZE = [
@@ -37,6 +35,7 @@ export default function Room33({ onComplete }: Room33Props) {
   const [started, setStarted] = useState(false);
   const [position, setPosition] = useState(START);
   const [visited, setVisited] = useState([cellKey(START.row, START.column)]);
+  const [route, setRoute] = useState([cellKey(START.row, START.column)]);
   const [feedback, setFeedback] = useState("");
   const [complete, setComplete] = useState(false);
 
@@ -55,19 +54,23 @@ export default function Room33({ onComplete }: Room33Props) {
     }
 
     setPosition(next);
-    setVisited((cells) => [...new Set([...cells, cellKey(next.row, next.column)])]);
+    const nextRoute = [...route, cellKey(next.row, next.column)];
+    setRoute(nextRoute);
+    const nextVisited = [...new Set([...visited, cellKey(next.row, next.column)])];
+    setVisited(nextVisited);
     setFeedback("");
 
     if (next.row === EXIT.row && next.column === EXIT.column) {
       setComplete(true);
       setFeedback(localizeAttribute("copy.ab2c61ad", "Wyjście odnalezione. Zespół przeszedł przez labirynt."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(() => onComplete(JSON.stringify(nextRoute)), 700);
     }
   }
 
   function resetMaze() {
     setPosition(START);
     setVisited([cellKey(START.row, START.column)]);
+    setRoute([cellKey(START.row, START.column)]);
     setFeedback(localizeAttribute("copy.3321564c", "Impuls wrócił do wejścia. Znajdź inną drogę."));
   }
 
@@ -117,45 +120,58 @@ export default function Room33({ onComplete }: Room33Props) {
       </h1>
       <p className="lead">
         <LocalizedText translationKey="copy.9993f3b3" fallback={"Poruszaj się po otwartych korytarzach. Dotarcie do ślepego zaułka nie kończy próby. "} /></p>
-      <div className="amygdala-maze" role="grid" aria-label={localizeAttribute("copy.73a6302d", "Mapa labiryntu, rząd po rzędzie.")}>
-        {MAZE.map((row, rowIndex) =>
-          (
-            <div className="maze-row" key={`row-${rowIndex}`} role="row">
-              {[...row].map((cell, columnIndex) => {
-            const key = cellKey(rowIndex, columnIndex);
-            const isCurrent =
-              position.row === rowIndex && position.column === columnIndex;
-            const isStart = START.row === rowIndex && START.column === columnIndex;
-            const isExit = EXIT.row === rowIndex && EXIT.column === columnIndex;
+      <div
+        aria-label={localizeAttribute("copy.73a6302d", "Mapa labiryntu, rząd po rzędzie.")}
+        className="amygdala-maze"
+        role="grid"
+      >
+        {MAZE.map((row, rowIndex) => (
+          <div className="maze-row" key={`row-${rowIndex}`} role="row">
+            {[...row].map((cell, columnIndex) => {
+              const key = cellKey(rowIndex, columnIndex);
+              const isCurrent =
+                position.row === rowIndex && position.column === columnIndex;
+              const isStart = START.row === rowIndex && START.column === columnIndex;
+              const isExit = EXIT.row === rowIndex && EXIT.column === columnIndex;
+              const isVisited = visited.includes(key);
+              const label = [
+                cell === "#" ? "Ściana" : "Korytarz",
+                isStart ? "wejście" : "",
+                isExit ? "wyjście" : "",
+                isCurrent ? "obecne położenie" : "",
+                isVisited ? "odwiedzone" : "",
+              ].filter(Boolean).join(", ");
+              const className = [
+                "maze-cell",
+                cell === "#" ? "is-wall" : "is-path",
+                isVisited ? "is-visited" : "",
+                isCurrent ? "is-current" : "",
+                isStart ? "is-start" : "",
+                isExit ? "is-exit" : "",
+              ].filter(Boolean).join(" ");
 
-            return (
-              <span
-                aria-label={[
-                  cell === "#" ? "Ściana" : "Korytarz",
-                  isStart ? "wejście" : "",
-                  isExit ? "wyjście" : "",
-                  isCurrent ? "obecne położenie" : "",
-                  visited.includes(key) ? "odwiedzone" : "",
-                ].filter(Boolean).join(", ")}
-                className={[
-                  "maze-cell",
-                  cell === "#" ? "is-wall" : "is-path",
-                  visited.includes(key) ? "is-visited" : "",
-                  isCurrent ? "is-current" : "",
-                  isStart ? "is-start" : "",
-                  isExit ? "is-exit" : "",
-                ].filter(Boolean).join(" ")}
-                key={key}
-                role="gridcell"
-                title={isCurrent ? "Położenie impulsu" : isStart ? "Wejście" : isExit ? "Wyjście" : undefined}
-              >
-                {isCurrent ? "●" : isStart ? "W" : isExit ? "X" : ""}
-              </span>
-            );
-              })}
-            </div>
-          ),
-        )}
+              return (
+                <span
+                  aria-label={label}
+                  className={className}
+                  key={key}
+                  role="gridcell"
+                  title={
+                    isCurrent
+                      ? "Położenie impulsu"
+                      : isStart
+                        ? "Wejście"
+                        : isExit
+                          ? "Wyjście"
+                          : undefined
+                  }
+                >
+                  {isCurrent ? "●" : isStart ? "W" : isExit ? "X" : ""}
+                </span>
+              );
+            })}
+          </div>
+        ))}
       </div>
       <div aria-label={localizeAttribute("copy.f78c56cf", "Sterowanie ruchem po labiryncie")} className="maze-controls">
         {MOVES.map((direction) => (

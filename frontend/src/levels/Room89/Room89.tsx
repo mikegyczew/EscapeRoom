@@ -6,7 +6,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room89Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const MEMORIES = [
@@ -59,7 +59,7 @@ export default function Room89({ onComplete }: Room89Props) {
     if (nextRestored.length === MEMORY_ORDER.length) {
       setComplete(true);
       setFeedback(localizeAttribute("copy.a886a52c", "Dziesięć synaps rozbłysło spokojnym światłem. Punkt Omega jest dostępny."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(() => onComplete(JSON.stringify(nextRestored)), 700);
     }
   }
 

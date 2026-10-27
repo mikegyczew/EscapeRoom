@@ -6,7 +6,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room88Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const PATH = [
@@ -43,7 +43,7 @@ export default function Room88({ onComplete }: Room88Props) {
     if (step === PATH.length - 1) {
       setComplete(true);
       setFeedback(localizeAttribute("copy.5f81adb5", "Bezpieczne przejście odnalezione. Zespół opuścił iluzję krawędzi."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(() => onComplete(JSON.stringify(nextRoute)), 700);
       return;
     }
 

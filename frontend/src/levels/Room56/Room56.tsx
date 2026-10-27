@@ -7,7 +7,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room56Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
   voiceEnabled: boolean;
 };
 
@@ -454,7 +454,7 @@ export default function Room56({ onComplete, voiceEnabled }: Room56Props) {
         </div>
         <blockquote>
           <LocalizedText translationKey="copy.3252cc70" fallback={"NOT A odwraca stan alarmu. AND wymaga A=0 i B=1. XOR zwraca 1, gdy C i D mają różne stany. OR odtwarza wyjście, gdy zadziała choć jedna ścieżka. "} /></blockquote>
-        <button className="primary-button" onClick={onComplete}>
+        <button className="primary-button" onClick={() => onComplete(JSON.stringify(inputs))}>
           <LocalizedText translationKey="copy.42766236" fallback={"KONTYNUUJ "} /><span><LocalizedText translationKey="copy.973c7cf5" fallback={"→"} /></span>
         </button>
         <button className="text-button" onClick={startMission}>

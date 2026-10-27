@@ -6,7 +6,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room83Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const NAMES = [
@@ -38,7 +38,7 @@ export default function Room83({ onComplete }: Room83Props) {
   const [feedback, setFeedback] = useState("");
   const [complete, setComplete] = useState(false);
 
-  function chooseName(isAuthor: boolean) {
+  function chooseName(name: string, isAuthor: boolean) {
     if (!isAuthor) {
       setFeedback(localizeAttribute("copy.2c393dae", "Ten zapis pochodzi z innego dokumentu. Sprawdź opis źródła przy nazwisku."));
       return;
@@ -46,7 +46,7 @@ export default function Room83({ onComplete }: Room83Props) {
 
     setComplete(true);
     setFeedback(localizeAttribute("copy.471b655e", "Sygnatura potwierdzona. Notatki należą do profesora Henry'ego Armitage'a."));
-    window.setTimeout(onComplete, 700);
+    window.setTimeout(() => onComplete(name), 700);
   }
 
   if (!started) {
@@ -99,7 +99,7 @@ export default function Room83({ onComplete }: Room83Props) {
             className="identity-name-card"
             disabled={complete}
             key={localizeAttribute(translationKeyFor(entry.name), entry.name)}
-            onClick={() => chooseName(entry.isAuthor)}
+            onClick={() => chooseName(entry.name, entry.isAuthor)}
             type="button"
           >
             <strong><LocalizedText fallback={entry.name} /></strong>

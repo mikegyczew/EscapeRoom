@@ -5,7 +5,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room76Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const SENTENCES = [
@@ -30,6 +30,7 @@ export default function Room76({ onComplete }: Room76Props) {
   const { text: localizeAttribute } = useTranslation();
   const [started, setStarted] = useState(false);
   const [sentenceIndex, setSentenceIndex] = useState(0);
+  const [solvedWords, setSolvedWords] = useState<string[]>([]);
   const [feedback, setFeedback] = useState("");
   const [complete, setComplete] = useState(false);
   const sentence = SENTENCES[sentenceIndex];
@@ -43,10 +44,14 @@ export default function Room76({ onComplete }: Room76Props) {
     if (sentenceIndex === SENTENCES.length - 1) {
       setComplete(true);
       setFeedback(localizeAttribute("copy.ec7add91", "Znaczenia wróciły na swoje miejsce. Słownik Pamięci został odtworzony."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(
+        () => onComplete(JSON.stringify([...solvedWords, word])),
+        700,
+      );
       return;
     }
 
+    setSolvedWords((previous) => [...previous, word]);
     setSentenceIndex((index) => index + 1);
     setFeedback(localizeAttribute("copy.389f0d42", "Znaczenie odzyskane. Przeczytaj kolejny fragment."));
   }

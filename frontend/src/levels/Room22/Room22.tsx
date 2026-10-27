@@ -4,7 +4,7 @@ import { LocalizedText } from "../../shared/localized-text";
 
 
 type Room22Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const TARGET_FREQUENCY = 98.4;
@@ -22,7 +22,7 @@ export default function Room22({ onComplete }: Room22Props) {
   function tuneRadio() {
     if (distance <= 0.05) {
       setFeedback(text("room22.feedback.complete", "Sygnał odnaleziony. Ukryta wiadomość wraca do archiwum."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(() => onComplete(frequency.toFixed(1)), 700);
       return;
     }
     setFeedback(

@@ -5,7 +5,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room44Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 export default function Room44({ onComplete }: Room44Props) {
@@ -25,7 +25,7 @@ export default function Room44({ onComplete }: Room44Props) {
 
     setComplete(true);
     setFeedback(localizeAttribute("copy.bf198a62", "Pierwszy sygnał odzyskany. Próg Zapomnienia ustępuje."));
-    window.setTimeout(onComplete, 700);
+    window.setTimeout(() => onComplete(answer.trim().toLocaleLowerCase("pl-PL")), 700);
   }
 
   if (!started) {

@@ -5,7 +5,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room27Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const LETTERS = [
@@ -58,7 +58,7 @@ export default function Room27({ onComplete }: Room27Props) {
     if (nextSelection.every((id, index) => id === CORRECT_ORDER[index])) {
       setComplete(true);
       setFeedback(localizeAttribute("copy.90862d27", "Chronologia odzyskana. W listach pozostała opowieść o wspólnym życiu."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(() => onComplete(JSON.stringify(nextSelection)), 700);
       return;
     }
 

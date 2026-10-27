@@ -5,7 +5,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room78Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const PERSPECTIVES = ["0°", "90°", "180°", "270°"];
@@ -30,7 +30,7 @@ export default function Room78({ onComplete }: Room78Props) {
 
     setComplete(true);
     setFeedback(localizeAttribute("copy.71e9d089", "Korytarz połączył wejście i wyjście. Zmiana perspektywy odsłoniła drogę."));
-    window.setTimeout(onComplete, 700);
+    window.setTimeout(() => onComplete(PERSPECTIVES[rotation]), 700);
   }
 
   if (!started) {

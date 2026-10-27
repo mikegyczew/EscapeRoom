@@ -6,7 +6,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room72Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const SYMBOLS = [
@@ -25,6 +25,7 @@ export default function Room72({ onComplete }: Room72Props) {
   const { text: localizeAttribute } = useTranslation();
   const [started, setStarted] = useState(false);
   const [step, setStep] = useState(0);
+  const [solvedSymbols, setSolvedSymbols] = useState<string[]>([]);
   const [feedback, setFeedback] = useState("");
   const [complete, setComplete] = useState(false);
 
@@ -37,10 +38,14 @@ export default function Room72({ onComplete }: Room72Props) {
     if (step === INSTRUCTIONS.length - 1) {
       setComplete(true);
       setFeedback(localizeAttribute("copy.0b17e535", "Komunikat odczytany bez użycia głosu. Archiwum odpowiada."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(
+        () => onComplete(JSON.stringify([...solvedSymbols, symbolId])),
+        700,
+      );
       return;
     }
 
+    setSolvedSymbols((previous) => [...previous, symbolId]);
     setStep((current) => current + 1);
     setFeedback(localizeAttribute("copy.a51aec43", "Symbol przyjęty. Odczytaj kolejny komunikat."));
   }

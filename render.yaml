@@ -6,10 +6,16 @@ services:
     region: frankfurt
     dockerfilePath: ./Backend/Dockerfile
     dockerContext: .
-    healthCheckPath: /
+    healthCheckPath: /healthz
     envVars:
       - key: ASPNETCORE_URLS
         value: http://0.0.0.0:10000
+      - key: Resend__ApiKey
+        sync: false
+      - key: Resend__FromAddress
+        sync: false
+      - key: Resend__FrontendBaseUrl
+        value: https://escaperoom-front.onrender.com
 
   - type: web
     name: escaperoom-web

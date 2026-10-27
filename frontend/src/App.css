@@ -586,6 +586,25 @@ h1 span {
   gap: 8px;
 }
 
+.backend-status.online .status-dot {
+  background: #00ff66;
+  box-shadow: 0 0 12px #00ff66;
+}
+
+.backend-status.checking .status-dot {
+  background: #ffca66;
+  box-shadow: 0 0 12px #ffca66;
+}
+
+.backend-status.offline .status-dot {
+  background: #ff6464;
+  box-shadow: 0 0 12px #ff6464;
+}
+
+.backend-status.offline {
+  color: #ff8b8b;
+}
+
 .header-controls {
   display: flex;
   align-items: center;
@@ -601,6 +620,7 @@ h1 span {
   background: rgba(12, 23, 19, 0.86);
   color: var(--er-muted);
   font: 10px "Courier New", monospace;
+  line-height: 1;
   letter-spacing: 1px;
   cursor: pointer;
   transition: color 0.2s ease, border-color 0.2s ease;
@@ -618,6 +638,7 @@ h1 span {
   background: rgba(12, 23, 19, 0.86);
   color: var(--er-muted);
   font: 10px "Courier New", monospace;
+  line-height: 1;
   letter-spacing: 1px;
   cursor: pointer;
   transition: color 0.2s ease, border-color 0.2s ease;
@@ -626,6 +647,7 @@ h1 span {
 .room-map-toggle {
   flex: 0 0 auto;
   padding: 8px 10px;
+  white-space: nowrap;
 }
 
 .room-map-toggle:hover,
@@ -766,6 +788,20 @@ h1 span {
   border: 1px solid rgba(138, 169, 154, 0.16);
   color: rgba(138, 169, 154, 0.72);
   text-align: center;
+}
+
+button.room-map-cell {
+  width: 100%;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+button.room-map-cell:hover,
+button.room-map-cell:focus-visible {
+  border-color: var(--er-green);
+  outline: 2px solid rgba(85, 255, 154, 0.55);
+  outline-offset: 1px;
 }
 
 .room-map-cell > span {

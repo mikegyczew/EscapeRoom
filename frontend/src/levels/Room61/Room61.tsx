@@ -5,7 +5,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room61Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const MOVES = [
@@ -30,6 +30,7 @@ export default function Room61({ onComplete }: Room61Props) {
   const { text: localizeAttribute } = useTranslation();
   const [started, setStarted] = useState(false);
   const [moveIndex, setMoveIndex] = useState(0);
+  const [solvedMoves, setSolvedMoves] = useState<string[]>([]);
   const [feedback, setFeedback] = useState("");
   const [complete, setComplete] = useState(false);
   const currentMove = MOVES[moveIndex];
@@ -43,10 +44,14 @@ export default function Room61({ onComplete }: Room61Props) {
     if (moveIndex === MOVES.length - 1) {
       setComplete(true);
       setFeedback(localizeAttribute("copy.3850e07f", "Partia odzyskana. Ostatni ruch odsłania kolejne połączenie."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(
+        () => onComplete(JSON.stringify([...solvedMoves, move])),
+        700,
+      );
       return;
     }
 
+    setSolvedMoves((previous) => [...previous, move]);
     setMoveIndex((index) => index + 1);
     setFeedback(localizeAttribute("copy.5346cb54", "Ruch potwierdzony. Odczytaj następny fragment partii."));
   }

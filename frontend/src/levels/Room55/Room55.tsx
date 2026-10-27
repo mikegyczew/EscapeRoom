@@ -5,7 +5,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room55Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const SOUND_SOURCES = [
@@ -40,7 +40,7 @@ export default function Room55({ onComplete }: Room55Props) {
     if (nextSilenced.length === SOUND_SOURCES.length) {
       setComplete(true);
       setFeedback(localizeAttribute("copy.7cf2aeb4", "Pokój ucichł. W ciszy zachował się ostatni zapis snu."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(() => onComplete(JSON.stringify(nextSilenced)), 700);
     }
   }
 

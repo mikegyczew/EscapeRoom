@@ -5,7 +5,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room67Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const DEFINITIONS = [
@@ -30,6 +30,7 @@ export default function Room67({ onComplete }: Room67Props) {
   const { text: localizeAttribute } = useTranslation();
   const [started, setStarted] = useState(false);
   const [step, setStep] = useState(0);
+  const [solvedWords, setSolvedWords] = useState<string[]>([]);
   const [feedback, setFeedback] = useState("");
   const [complete, setComplete] = useState(false);
   const definition = DEFINITIONS[step];
@@ -43,10 +44,14 @@ export default function Room67({ onComplete }: Room67Props) {
     if (step === DEFINITIONS.length - 1) {
       setComplete(true);
       setFeedback(localizeAttribute("copy.523dec13", "Wspólny słownik uzgodniony. Nazwy i przedmioty znów do siebie pasują."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(
+        () => onComplete(JSON.stringify([...solvedWords, word])),
+        700,
+      );
       return;
     }
 
+    setSolvedWords((previous) => [...previous, word]);
     setStep((current) => current + 1);
     setFeedback(localizeAttribute("copy.6d7daefb", "Znaczenie uzgodnione. Przejdź do kolejnego przedmiotu."));
   }

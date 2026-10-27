@@ -4,7 +4,7 @@ import { LocalizedText } from "../../shared/localized-text";
 
 
 type Room11Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const DIRECTIONS = [
@@ -46,6 +46,7 @@ export default function Room11({ onComplete }: Room11Props) {
   const { text } = useTranslation();
   const [started, setStarted] = useState(false);
   const [round, setRound] = useState(0);
+  const [solvedDirections, setSolvedDirections] = useState<string[]>([]);
   const [feedback, setFeedback] = useState("");
 
   function chooseDirection(direction: string) {
@@ -56,10 +57,14 @@ export default function Room11({ onComplete }: Room11Props) {
 
     if (round === MISSING_DIRECTIONS.length - 1) {
       setFeedback(text("room11.complete", "Ukryte przejście ujawnione. Ślepa plamka przestała zasłaniać wyjście."));
-      window.setTimeout(onComplete, 700);
+      window.setTimeout(
+        () => onComplete(JSON.stringify([...solvedDirections, direction])),
+        700,
+      );
       return;
     }
 
+    setSolvedDirections((previous) => [...previous, direction]);
     setRound((previous) => previous + 1);
     setFeedback(text("room11.roundComplete", "Optyczny ślad odzyskany. Następny układ pojawia się w ciemności."));
   }

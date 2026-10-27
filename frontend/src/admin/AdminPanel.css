@@ -1,0 +1,253 @@
+.admin-panel {
+  width: min(1120px, calc(100% - 2rem));
+}
+
+.admin-heading,
+.admin-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.admin-heading {
+  margin-bottom: 1.5rem;
+}
+
+.admin-heading h1 {
+  margin: 0.25rem 0 0.75rem;
+}
+
+.admin-heading .lead {
+  max-width: 46rem;
+  margin: 0;
+}
+
+.admin-nav,
+.admin-selectors,
+.admin-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.admin-nav {
+  grid-template-columns: repeat(auto-fit, minmax(190px, max-content));
+  margin-bottom: 1rem;
+}
+
+.admin-nav button[aria-pressed="true"] {
+  border-color: #8effa8;
+  color: #8effa8;
+}
+
+.admin-card {
+  margin-top: 1.25rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  border: 1px solid rgb(142 255 168 / 24%);
+  border-radius: 0.75rem;
+  background: rgb(5 15 11 / 88%);
+}
+
+.admin-card h2 {
+  margin-top: 0;
+}
+
+.admin-card > p,
+.admin-card-heading p {
+  color: #b6c6bd;
+}
+
+.admin-form,
+.admin-form label,
+.admin-selectors label,
+.admin-content-row label,
+.admin-translation-editor label {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.admin-form {
+  gap: 1rem;
+}
+
+.admin-form input,
+.admin-form textarea,
+.admin-selectors select,
+.admin-content-row input,
+.admin-content-row textarea,
+.admin-translation-editor input,
+.admin-translation-editor select,
+.admin-card-heading select {
+  width: 100%;
+  min-width: 0;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgb(142 255 168 / 35%);
+  border-radius: 0.4rem;
+  color: #f0fff4;
+  background: #101b16;
+  font: inherit;
+}
+
+.admin-form input:disabled {
+  opacity: 0.7;
+}
+
+.admin-form textarea,
+.admin-content-row textarea {
+  resize: vertical;
+}
+
+.admin-checkbox {
+  display: flex !important;
+  align-items: center;
+}
+
+.admin-checkbox input {
+  width: auto;
+}
+
+.admin-room-form {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  align-items: end;
+}
+
+.admin-room-form h2,
+.admin-room-form .admin-muted {
+  grid-column: 1 / -1;
+}
+
+.admin-muted {
+  color: #b6c6bd;
+  font-size: 0.85rem;
+}
+
+.admin-content-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) minmax(90px, 0.6fr) 100px minmax(220px, 3fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid rgb(142 255 168 / 14%);
+}
+
+.admin-content-row:last-child {
+  border-bottom: 0;
+}
+
+.admin-translation-editor {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 2fr);
+  gap: 1.5rem;
+}
+
+.admin-translation-editor > div {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.admin-translation-editor select {
+  min-height: 18rem;
+}
+
+.admin-code-input {
+  font-family: "Courier New", monospace !important;
+  font-size: 0.9rem !important;
+}
+
+.admin-message {
+  padding: 0.8rem 1rem;
+  border: 1px solid rgb(142 255 168 / 40%);
+  border-radius: 0.5rem;
+}
+
+.admin-message.is-error {
+  border-color: #ff8585;
+  color: #ffd2d2;
+}
+
+.admin-database-summary,
+.admin-database-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 1rem 0;
+  color: #b6c6bd;
+}
+
+.admin-database-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid rgb(142 255 168 / 20%);
+  border-radius: 0.5rem;
+}
+
+.admin-database-table {
+  width: 100%;
+  border-collapse: collapse;
+  font: 0.82rem "Courier New", monospace;
+}
+
+.admin-database-table th,
+.admin-database-table td {
+  max-width: 32rem;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid rgb(142 255 168 / 12%);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.admin-database-table th {
+  position: sticky;
+  top: 0;
+  color: #8effa8;
+  background: #101b16;
+}
+
+.admin-database-table td {
+  color: #e4eee7;
+  white-space: pre-wrap;
+}
+
+.admin-database-edit-input {
+  width: min(32rem, 70vw);
+  min-width: 14rem;
+  min-height: 3.5rem;
+  padding: 0.6rem;
+  border: 1px solid rgb(142 255 168 / 50%);
+  border-radius: 0.3rem;
+  background: #08120d;
+  color: #e4eee7;
+  font: inherit;
+  resize: vertical;
+}
+
+.admin-database-actions {
+  min-width: 9rem;
+  white-space: nowrap;
+}
+
+.admin-database-actions .secondary-button {
+  margin: 0 0.25rem 0.25rem 0;
+  padding: 0.5rem 0.6rem;
+}
+
+@media (max-width: 760px) {
+  .admin-heading,
+  .admin-card-heading {
+    flex-direction: column;
+  }
+
+  .admin-content-row,
+  .admin-translation-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-database-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

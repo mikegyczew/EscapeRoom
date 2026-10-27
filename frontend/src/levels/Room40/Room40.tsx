@@ -6,7 +6,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room40Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const MEMORIES = [
@@ -46,7 +46,7 @@ export default function Room40({ onComplete }: Room40Props) {
 
     setComplete(true);
     setFeedback(localizeAttribute("copy.437e328f", "List Rose pozostał na miejscu. Stały punkt przerwał pętlę czasu."));
-    window.setTimeout(onComplete, 700);
+    window.setTimeout(() => onComplete(memoryId), 700);
   }
 
   if (!started) {

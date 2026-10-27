@@ -6,7 +6,7 @@ import { useTranslation } from "../../shared/use-translation";
 
 
 type Room50Props = {
-  onComplete: () => void;
+  onComplete: (proof: string) => void;
 };
 
 const CALIBRATION_POINTS = [
@@ -33,7 +33,7 @@ export default function Room50({ onComplete }: Room50Props) {
 
     setComplete(true);
     setFeedback(localizeAttribute("copy.a0bc6297", "Projekcja ustabilizowana. Zapis zachował pełną ścieżkę."));
-    window.setTimeout(onComplete, 700);
+    window.setTimeout(() => onComplete(JSON.stringify(values)), 700);
   }
 
   if (!started) {
